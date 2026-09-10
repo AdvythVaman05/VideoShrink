@@ -17,6 +17,8 @@ server {
         proxy_pass http://127.0.0.1:8000/health;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
     # FastAPI Swagger Docs & OpenAPI Schema
@@ -24,12 +26,16 @@ server {
         proxy_pass http://127.0.0.1:8000/docs;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
     location /openapi.json {
         proxy_pass http://127.0.0.1:8000/openapi.json;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
     # FastAPI REST API endpoints
@@ -41,9 +47,9 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Streamlit UI & Static Assets
-    location / {
-        proxy_pass http://127.0.0.1:8501/;
+    # Streamlit core endpoints (WebSocket stream, health, host-config)
+    location /_stcore/ {
+        proxy_pass http://127.0.0.1:8501/_stcore/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
@@ -51,15 +57,19 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400s;
     }
 
-    # Streamlit WebSocket stream endpoint
-    location ^~ /_stcore/stream {
-        proxy_pass http://127.0.0.1:8501/_stcore/stream;
+    # Streamlit UI & Static Assets
+    location / {
+        proxy_pass http://127.0.0.1:8501;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
         proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 86400s;
     }
 }

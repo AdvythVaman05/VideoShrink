@@ -4,6 +4,7 @@ FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     DEBIAN_FRONTEND=noninteractive \
+    PYTHONPATH=/app \
     PORT=8000
 
 # Install system dependencies: FFmpeg, OpenCV headless libraries, and Nginx reverse proxy

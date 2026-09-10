@@ -3,6 +3,9 @@ set -e
 
 # Respect dynamic Railway PORT or default to 8080
 export PORT="${PORT:-8080}"
+export PYTHONPATH="/app:${PYTHONPATH}"
+cd /app
+
 echo "=========================================================="
 echo "Starting VideoShrink Production Environment on PORT ${PORT}"
 echo "=========================================================="
@@ -21,7 +24,7 @@ mkdir -p /app/data/uploads /app/data/processed /app/data/thumbnails /app/experim
 
 # Start FastAPI Uvicorn on internal port 8000
 echo "Launching FastAPI (internal 127.0.0.1:8000)..."
-python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --workers 1 &
+python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 &
 FASTAPI_PID=$!
 
 # Start Streamlit on internal port 8501
@@ -44,6 +47,16 @@ cleanup() {
     exit 0
 }
 trap cleanup SIGINT SIGTERM
+
+# Wait for internal services to be ready before accepting public traffic
+echo "Waiting for internal services to become ready..."
+for i in {1..30}; do
+    if curl -sf http://127.0.0.1:8000/health >/dev/null 2>&1 && curl -sf http://127.0.0.1:8501/_stcore/health >/dev/null 2>&1; then
+        echo "All internal services are healthy and responding!"
+        break
+    fi
+    sleep 0.5
+done
 
 echo "Starting Nginx reverse proxy on public 0.0.0.0:${PORT}..."
 # Run Nginx in foreground (keeps container alive)

@@ -1,0 +1,66 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# C extensions
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs & temporary files
+*.log
+temp/
+tmp/
+.DS_Store
+
+# Environments & secrets
+.env
+.env.*
+.venv/
+venv/
+env/
+ENV/
+
+# IDEs & editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Runtime data & processed videos (preserve directory structure via .gitkeep)
+data/uploads/*
+!data/uploads/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/thumbnails/*
+!data/thumbnails/.gitkeep
+
+# Ephemeral runtime database
+experiments/videoshrink.db
+experiments/videoshrink.db-journal
+
+# Large external validation test videos & run outputs (downloadable via experiments/download_real_videos.py)
+experiments/test_videos/*
+!experiments/test_videos/.gitkeep
+experiments/optimized_videos/*
+!experiments/optimized_videos/.gitkeep

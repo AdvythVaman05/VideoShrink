@@ -1,0 +1,7 @@
+# Ensure shell scripts always retain Linux line endings (LF)
+*.sh text eol=lf
+deployment/entrypoint.sh text eol=lf
+deployment/nginx.conf.template text eol=lf
+
+# Auto detect text files and perform LF normalization
+* text=auto

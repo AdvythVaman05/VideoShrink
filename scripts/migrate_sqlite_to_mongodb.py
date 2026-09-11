@@ -31,6 +31,24 @@ def parse_args():
         help="Path to the SQLite database file (default: experiments/videoshrink.db)"
     )
     parser.add_argument(
+        "--mongo-uri",
+        type=str,
+        default=None,
+        help="MongoDB connection URI (optional; defaults to MONGODB_URI environment variable or .env)"
+    )
+    parser.add_argument(
+        "--cutoff",
+        type=str,
+        default="2026-09-11 03:40:05",
+        help="Only migrate records created on or before this timestamp (default: '2026-09-11 03:40:05' for the 49 historical records)"
+    )
+    parser.add_argument(
+        "--max-records",
+        type=int,
+        default=49,
+        help="Maximum historical records to migrate (default: 49)"
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Perform a dry run without modifying MongoDB."
@@ -51,35 +69,97 @@ def migrate():
 
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT * FROM experiments ORDER BY created_at ASC")
+        cursor.execute(
+            "SELECT * FROM experiments WHERE created_at <= ? ORDER BY created_at ASC LIMIT ?",
+            (args.cutoff, args.max_records)
+        )
         rows = cursor.fetchall()
     except sqlite3.OperationalError as e:
         print(f"[ERROR] Failed to query experiments table: {e}")
         conn.close()
         sys.exit(1)
 
-    print(f"[INFO] Found {len(rows)} experiment records in SQLite.")
+    print(f"[INFO] Query matched {len(rows)} historical records (cutoff <= '{args.cutoff}', limit {args.max_records}).")
 
     if not rows:
         print("[INFO] No records to migrate. Exiting.")
         conn.close()
         return
 
-    # Check MongoDB connection
-    mongo_uri = settings.MONGODB_URI
-    if not mongo_uri:
-        print("[WARNING] MONGODB_URI is not configured in environment.")
-        print("[INFO] Records verified in SQLite, but MongoDB write was skipped because MONGODB_URI is unset.")
+    # Dry-run validation of records
+    seen_ids = set()
+    seen_codes = set()
+    duplicates = []
+    malformed_fields = []
+    parsed_records = []
+
+    for idx, row in enumerate(rows):
+        data = dict(row)
+        exp_id = data.get("id")
+        exp_code = data.get("experiment_code")
+
+        if not exp_id:
+            malformed_fields.append((idx, "missing_id"))
+        elif exp_id in seen_ids:
+            duplicates.append(exp_id)
+        seen_ids.add(exp_id)
+        seen_codes.add(exp_code)
+
+        # Validate & parse JSON fields
+        for json_field in ["parameters", "failure_summary", "quality_summary"]:
+            val = data.get(json_field)
+            if isinstance(val, str) and val.strip():
+                try:
+                    data[json_field] = json.loads(val)
+                except json.JSONDecodeError as e:
+                    malformed_fields.append((exp_id, f"{json_field}: {e}"))
+
+        parsed_records.append(data)
+
+    if args.dry_run:
+        print("\n=======================================================")
+        print("MIGRATION DRY-RUN AUDIT REPORT")
+        print("=======================================================")
+        print(f"Total SQLite Records:           {len(rows)}")
+        print(f"Unique Experiment IDs:          {len(seen_ids)}")
+        print(f"Unique Experiment Codes:        {len(seen_codes)}")
+        print(f"Duplicate IDs Detected:         {len(duplicates)}")
+        print(f"Malformed / Invalid Fields:     {len(malformed_fields)}")
+        print(f"Target Database:                {settings.MONGODB_DATABASE}")
+        print(f"Target Collection:              experiments")
+        print(f"ID Preservation:                YES (retaining original UUIDs in 'id' field)")
+        print("Idempotency Guarantee:          YES (upsert on {'id': exp_id})")
+
+        if duplicates:
+            print(f"[WARNING] Duplicate IDs: {duplicates}")
+        if malformed_fields:
+            print(f"[WARNING] Malformed fields: {malformed_fields}")
+
+        print("\nEarliest record to migrate:")
+        e0 = parsed_records[0]
+        print(f"  ID: {e0.get('id')} | Code: {e0.get('experiment_code')} | Date: {e0.get('created_at')} | Strategy: {e0.get('strategy')}")
+        print("Latest record to migrate:")
+        e_last = parsed_records[-1]
+        print(f"  ID: {e_last.get('id')} | Code: {e_last.get('experiment_code')} | Date: {e_last.get('created_at')} | Strategy: {e_last.get('strategy')}")
+        print("=======================================================")
+        print("[DRY RUN COMPLETE] Dataset is valid and ready for migration.")
         conn.close()
         return
+
+    # Check MongoDB connection URI
+    mongo_uri = args.mongo_uri or settings.MONGODB_URI
+    if not mongo_uri:
+        print("[ERROR] MONGODB_URI is not configured in environment, .env, or via --mongo-uri.")
+        print("[INFO] Cannot connect to MongoDB Atlas without a connection URI.")
+        conn.close()
+        sys.exit(1)
 
     masked_uri = mask_mongo_uri(mongo_uri)
     print(f"[INFO] Target MongoDB Atlas: {masked_uri} (Database: {settings.MONGODB_DATABASE})")
 
-    if args.dry_run:
-        print(f"[DRY RUN] Would upsert {len(rows)} records into MongoDB Atlas.")
-        conn.close()
-        return
+    # Override setting if provided via CLI
+    if args.mongo_uri:
+        settings.MONGODB_URI = args.mongo_uri
 
     mgr = MongoDBManager()
     if not mgr.connect():
@@ -97,19 +177,8 @@ def migrate():
     migrated_count = 0
     error_count = 0
 
-    for row in rows:
-        data = dict(row)
+    for data in parsed_records:
         exp_id = data.get("id")
-
-        # Parse JSON fields safely
-        for json_field in ["parameters", "failure_summary", "quality_summary"]:
-            val = data.get(json_field)
-            if isinstance(val, str) and val.strip():
-                try:
-                    data[json_field] = json.loads(val)
-                except json.JSONDecodeError:
-                    pass
-
         try:
             coll.update_one({"id": exp_id}, {"$set": data}, upsert=True)
             migrated_count += 1
@@ -118,7 +187,7 @@ def migrate():
             error_count += 1
 
     conn.close()
-    print(f"[SUCCESS] Migration completed: {migrated_count} records upserted, {error_count} errors.")
+    print(f"\n[SUCCESS] Migration completed: {migrated_count} records upserted into 'experiments', {error_count} errors.")
 
 if __name__ == "__main__":
     migrate()

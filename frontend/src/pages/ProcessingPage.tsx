@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { Loader2, AlertCircle, ArrowLeft, CheckCircle2 } from 'lucide-react';
-import { api } from '../lib/api';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { Loader2, AlertCircle, ArrowLeft, CheckCircle2, WifiOff } from 'lucide-react';
+import { api, ApiError } from '../lib/api';
 import type { JobStatusResponse } from '../types/api';
 
 interface ProcessingPageProps {
@@ -8,6 +8,7 @@ interface ProcessingPageProps {
   onCompleted: (jobId: string) => void;
   onFailed: (error: string) => void;
   onCancel: () => void;
+  onStaleJob?: () => void;
 }
 
 export const ProcessingPage: React.FC<ProcessingPageProps> = ({
@@ -15,6 +16,7 @@ export const ProcessingPage: React.FC<ProcessingPageProps> = ({
   onCompleted,
   onFailed,
   onCancel,
+  onStaleJob,
 }) => {
   const [status, setStatus] = useState<JobStatusResponse>({
     job_id: jobId,
@@ -23,41 +25,96 @@ export const ProcessingPage: React.FC<ProcessingPageProps> = ({
     current_step: 'Initializing compression job...',
     error_message: null,
   });
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const isMountedRef = useRef(true);
+  const isCheckingRef = useRef(false);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const checkStatus = useCallback(async () => {
+    if (isCheckingRef.current || !isMountedRef.current) return;
+    isCheckingRef.current = true;
+
+    try {
+      const res = await api.getJobStatus(jobId);
+      if (!isMountedRef.current) return;
+
+      setStatus(res);
+      setIsReconnecting(false);
+
+      if (res.status === 'completed') {
+        if (pollTimerRef.current) {
+          clearInterval(pollTimerRef.current);
+          pollTimerRef.current = null;
+        }
+        onCompleted(jobId);
+      } else if (res.status === 'failed') {
+        if (pollTimerRef.current) {
+          clearInterval(pollTimerRef.current);
+          pollTimerRef.current = null;
+        }
+        onFailed(res.error_message || 'Video processing failed.');
+      }
+    } catch (err: unknown) {
+      if (!isMountedRef.current) return;
+
+      if (err instanceof ApiError && err.status === 404) {
+        if (pollTimerRef.current) {
+          clearInterval(pollTimerRef.current);
+          pollTimerRef.current = null;
+        }
+        if (onStaleJob) {
+          onStaleJob();
+        } else {
+          onFailed(`Processing job '${jobId}' was not found on server.`);
+        }
+        return;
+      }
+
+      // Temporary network error or server hiccup
+      setIsReconnecting(true);
+    } finally {
+      isCheckingRef.current = false;
+    }
+  }, [jobId, onCompleted, onFailed, onStaleJob]);
 
   useEffect(() => {
-    let isMounted = true;
-    let pollInterval: ReturnType<typeof setInterval>;
+    isMountedRef.current = true;
 
-    const checkStatus = async () => {
-      try {
-        const res = await api.getJobStatus(jobId);
-        if (!isMounted) return;
+    // 1. Immediately poll status on mount
+    checkStatus();
 
-        setStatus(res);
+    // 2. Set up regular polling interval (1500ms)
+    pollTimerRef.current = setInterval(() => {
+      if (!document.hidden) {
+        checkStatus();
+      }
+    }, 1500);
 
-        if (res.status === 'completed') {
-          clearInterval(pollInterval);
-          setTimeout(() => {
-            if (isMounted) onCompleted(jobId);
-          }, 600);
-        } else if (res.status === 'failed') {
-          clearInterval(pollInterval);
-          onFailed(res.error_message || 'Video processing failed.');
-        }
-      } catch (err) {
-        if (!isMounted) return;
-        // Keep polling briefly in case of transient network hiccup
+    // 3. Tab switching & window focus handlers:
+    // When the browser tab becomes active again, immediately poll without waiting for interval
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        checkStatus();
       }
     };
 
-    checkStatus();
-    pollInterval = setInterval(checkStatus, 1000);
+    const handleFocus = () => {
+      checkStatus();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
 
     return () => {
-      isMounted = false;
-      clearInterval(pollInterval);
+      isMountedRef.current = false;
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
     };
-  }, [jobId, onCompleted, onFailed]);
+  }, [checkStatus]);
 
   const percent = Math.min(
     100,
@@ -66,6 +123,14 @@ export const ProcessingPage: React.FC<ProcessingPageProps> = ({
 
   return (
     <div className="max-w-xl mx-auto px-4 py-20 text-center space-y-8">
+      {/* Reconnecting banner if network drops */}
+      {isReconnecting && (
+        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#FFF8E6] border border-[#FEEBAA] text-[#B7791F] text-xs font-mono animate-pulse">
+          <WifiOff className="w-3.5 h-3.5 shrink-0" />
+          <span>Connection hiccup — reconnecting to background job...</span>
+        </div>
+      )}
+
       <div className="w-16 h-16 rounded-full bg-[#EFE8DC] text-[#D95F32] flex items-center justify-center mx-auto">
         {status.status === 'completed' ? (
           <CheckCircle2 className="w-8 h-8 text-[#1E7E34]" />
@@ -111,7 +176,7 @@ export const ProcessingPage: React.FC<ProcessingPageProps> = ({
           <button
             type="button"
             onClick={onCancel}
-            className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-[#F5C2B8] text-xs font-medium text-[#C24F26] hover:bg-[#FDF2F0]"
+            className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-[#F5C2B8] text-xs font-medium text-[#C24F26] hover:bg-[#FDF2F0] cursor-pointer"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
             <span>Return to configuration</span>
@@ -121,7 +186,7 @@ export const ProcessingPage: React.FC<ProcessingPageProps> = ({
 
       {/* Subtext */}
       <p className="text-xs text-[#77716A] max-w-sm mx-auto">
-        Running frame-by-frame color/gradient histogram diffing, optical flow calculations, and multi-threaded video encoding.
+        Running frame-by-frame color/gradient histogram diffing, optical flow calculations, and multi-threaded video encoding in background worker.
       </p>
     </div>
   );

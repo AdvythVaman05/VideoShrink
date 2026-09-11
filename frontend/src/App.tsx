@@ -1,11 +1,11 @@
-import React, { useState, useEffect, Component, type ErrorInfo, type ReactNode } from 'react';
+import React, { useState, useEffect, useCallback, Component, type ErrorInfo, type ReactNode } from 'react';
 import { Header } from './components/Header';
 import { LandingPage } from './pages/LandingPage';
 import { ConfigPage } from './pages/ConfigPage';
 import { ProcessingPage } from './pages/ProcessingPage';
 import { ResultsPage } from './pages/ResultsPage';
 import { ExperimentsPage } from './pages/ExperimentsPage';
-import { api } from './lib/api';
+import { api, ApiError } from './lib/api';
 import { Loader2, AlertCircle, RotateCcw, Download } from 'lucide-react';
 import type {
   UploadResponse,
@@ -94,6 +94,58 @@ export const App: React.FC = () => {
   const [jobId, setJobId] = useState<string | null>(null);
   const [results, setResults] = useState<ProcessResultsResponse | null>(null);
   const [isLoadingSaved, setIsLoadingSaved] = useState<boolean>(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Restore job status and results from backend using jobId
+  const restoreJob = useCallback(async (id: string, preferredStage?: AppStage) => {
+    setIsLoadingSaved(true);
+    setLoadError(null);
+    setJobId(id);
+    localStorage.setItem('videoshrink_active_job_id', id);
+
+    try {
+      const statusRes = await api.getJobStatus(id);
+
+      if (statusRes.status === 'completed') {
+        localStorage.setItem('videoshrink_job_state', 'completed');
+        window.location.hash = `#results/${id}`;
+        setStage('results');
+
+        // Fetch full results
+        const res = await api.getJobResults(id);
+        setResults(res);
+      } else if (statusRes.status === 'failed') {
+        localStorage.setItem('videoshrink_job_state', 'failed');
+        window.location.hash = `#processing/${id}`;
+        setStage('processing');
+      } else {
+        // 'pending' or 'processing'
+        localStorage.setItem('videoshrink_job_state', 'processing');
+        window.location.hash = `#processing/${id}`;
+        setStage('processing');
+      }
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.status === 404) {
+        // Stale or deleted job on server (e.g. server restarted)
+        console.warn(`Job ${id} not found on server. Clearing stale session.`);
+        localStorage.removeItem('videoshrink_active_job_id');
+        localStorage.removeItem('videoshrink_job_state');
+        if (window.location.hash.includes(id)) {
+          window.location.hash = '';
+        }
+        setJobId(null);
+        setResults(null);
+        setStage('upload');
+      } else {
+        // Network or transient server error
+        console.error(`Network error restoring job ${id}:`, err);
+        setLoadError('Temporary connection error while recovering job.');
+        setStage(preferredStage || 'processing');
+      }
+    } finally {
+      setIsLoadingSaved(false);
+    }
+  }, []);
 
   // Restore state from URL hash or localStorage on initial load & hash change
   useEffect(() => {
@@ -108,53 +160,29 @@ export const App: React.FC = () => {
       const resultsMatch = hash.match(/^#\/?results\/([a-zA-Z0-9_-]+)/);
       if (resultsMatch) {
         const id = resultsMatch[1];
-        setJobId(id);
-        setStage('results');
-        setIsLoadingSaved(true);
-        try {
-          const res = await api.getJobResults(id);
-          setResults(res);
-          localStorage.setItem('videoshrink_active_job_id', id);
-        } catch (e) {
-          console.error('Failed to restore job results from hash:', e);
-        } finally {
-          setIsLoadingSaved(false);
-        }
+        await restoreJob(id, 'results');
         return;
       }
 
       const procMatch = hash.match(/^#\/?processing\/([a-zA-Z0-9_-]+)/);
       if (procMatch) {
         const id = procMatch[1];
-        setJobId(id);
-        setStage('processing');
+        await restoreJob(id, 'processing');
         return;
       }
 
       // Check localStorage if hash has no job
       const savedJobId = localStorage.getItem('videoshrink_active_job_id');
-      if (savedJobId && stage === 'upload' && !results) {
-        setIsLoadingSaved(true);
-        try {
-          const res = await api.getJobResults(savedJobId);
-          if (res && res.metrics) {
-            setJobId(savedJobId);
-            setResults(res);
-            setStage('results');
-            window.location.hash = `#results/${savedJobId}`;
-          }
-        } catch {
-          localStorage.removeItem('videoshrink_active_job_id');
-        } finally {
-          setIsLoadingSaved(false);
-        }
+      if (savedJobId) {
+        const savedState = localStorage.getItem('videoshrink_job_state');
+        await restoreJob(savedJobId, savedState === 'results' ? 'results' : 'processing');
       }
     };
 
     handleHash();
     window.addEventListener('hashchange', handleHash);
     return () => window.removeEventListener('hashchange', handleHash);
-  }, []);
+  }, [restoreJob]);
 
   const handleUploadSuccess = (data: UploadResponse) => {
     setUploadData(data);
@@ -164,29 +192,47 @@ export const App: React.FC = () => {
   const handleStartProcessing = async (req: ProcessRequest) => {
     const res = await api.startProcessing(req);
     setJobId(res.job_id);
+    setResults(null);
     setStage('processing');
     localStorage.setItem('videoshrink_active_job_id', res.job_id);
+    localStorage.setItem('videoshrink_job_state', 'processing');
     window.location.hash = `#processing/${res.job_id}`;
   };
 
   const handleProcessingComplete = async (completedJobId: string) => {
-    try {
-      const res = await api.getJobResults(completedJobId);
-      setResults(res);
-      setStage('results');
-      localStorage.setItem('videoshrink_active_job_id', completedJobId);
-      window.location.hash = `#results/${completedJobId}`;
-    } catch (err) {
-      console.error('Failed to fetch completed job results:', err);
+    localStorage.setItem('videoshrink_active_job_id', completedJobId);
+    localStorage.setItem('videoshrink_job_state', 'completed');
+    window.location.hash = `#results/${completedJobId}`;
+    setStage('results');
+    setLoadError(null);
+
+    // Fetch results with resilient retry logic
+    let attempts = 0;
+    while (attempts < 3) {
+      try {
+        const res = await api.getJobResults(completedJobId);
+        setResults(res);
+        return;
+      } catch (err) {
+        attempts++;
+        if (attempts >= 3) {
+          console.error('Failed to fetch completed job results after 3 attempts:', err);
+          setLoadError('Failed to load processing results. Please click Retry.');
+        } else {
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+      }
     }
   };
 
   const handleReset = () => {
     localStorage.removeItem('videoshrink_active_job_id');
+    localStorage.removeItem('videoshrink_job_state');
     window.location.hash = '';
     setUploadData(null);
     setJobId(null);
     setResults(null);
+    setLoadError(null);
     setStage('upload');
   };
 
@@ -198,10 +244,14 @@ export const App: React.FC = () => {
           setTab(selectedTab);
           if (selectedTab === 'experiments') {
             window.location.hash = '#experiments';
-          } else if (stage === 'results' && jobId) {
-            window.location.hash = `#results/${jobId}`;
-          } else {
-            window.location.hash = '';
+          } else if (selectedTab === 'optimize') {
+            if (stage === 'results' && jobId) {
+              window.location.hash = `#results/${jobId}`;
+            } else if (stage === 'processing' && jobId) {
+              window.location.hash = `#processing/${jobId}`;
+            } else {
+              window.location.hash = '';
+            }
           }
         }}
       />
@@ -211,7 +261,7 @@ export const App: React.FC = () => {
           {isLoadingSaved ? (
             <div className="flex flex-col items-center justify-center py-28 space-y-3">
               <Loader2 className="w-7 h-7 text-[#D95F32] animate-spin" />
-              <p className="text-xs font-mono text-[#77716A]">Loading compression results...</p>
+              <p className="text-xs font-mono text-[#77716A]">Restoring compression session...</p>
             </div>
           ) : tab === 'experiments' ? (
             <ExperimentsPage
@@ -242,15 +292,50 @@ export const App: React.FC = () => {
                     console.error('Processing job failed:', err);
                   }}
                   onCancel={() => setStage('config')}
+                  onStaleJob={handleReset}
                 />
               )}
 
-              {stage === 'results' && results && (
-                <ResultsPage
-                  results={results}
-                  originalMetadata={uploadData?.metadata}
-                  onStartOver={handleReset}
-                />
+              {stage === 'results' && (
+                results ? (
+                  <ResultsPage
+                    results={results}
+                    originalMetadata={uploadData?.metadata}
+                    onStartOver={handleReset}
+                  />
+                ) : (
+                  <div className="max-w-xl mx-auto px-4 py-24 text-center space-y-4">
+                    {loadError ? (
+                      <div className="p-6 rounded-2xl bg-[#FDF2F0] border border-[#F5C2B8] text-center space-y-4">
+                        <AlertCircle className="w-8 h-8 text-[#C24F26] mx-auto" />
+                        <h3 className="text-base font-semibold text-[#252321]">Unable to load results</h3>
+                        <p className="text-xs text-[#77716A]">{loadError}</p>
+                        <div className="flex justify-center gap-3 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => jobId && handleProcessingComplete(jobId)}
+                            className="px-4 py-2 rounded-xl bg-[#D95F32] text-white text-xs font-medium hover:bg-[#C24F26] cursor-pointer"
+                          >
+                            Retry
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleReset}
+                            className="px-4 py-2 rounded-xl bg-white border border-[#DED7CC] text-xs font-medium hover:bg-[#EFE8DC] cursor-pointer"
+                          >
+                            Start Over
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center space-y-3">
+                        <Loader2 className="w-8 h-8 text-[#D95F32] animate-spin" />
+                        <p className="text-sm font-serif text-[#252321]">Finalizing results...</p>
+                        <p className="text-xs font-mono text-[#77716A]">Compiling visual proxy metrics and video streams</p>
+                      </div>
+                    )}
+                  </div>
+                )
               )}
             </>
           )}

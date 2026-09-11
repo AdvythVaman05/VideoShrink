@@ -10,6 +10,7 @@ from pathlib import Path
 from backend.app.config import settings
 from backend.app.video.reader import VideoReader
 from backend.app.video.writer import VideoWriter
+from backend.app.sampling.base import SelectionResult
 from backend.app.sampling.selector import FrameSelector
 from backend.app.analysis.failure import FailureAnalyzer
 from backend.app.evaluation.metrics import ReductionMetrics

@@ -16,6 +16,7 @@ from backend.app.analysis.failure import FailureAnalyzer
 from backend.app.evaluation.metrics import ReductionMetrics
 from backend.app.evaluation.benchmark import VisualPreservationProxyEvaluator
 from backend.app.db.database import db
+from backend.app.database.repositories import job_repo, experiment_repo
 
 @dataclass
 class JobState:
@@ -35,7 +36,12 @@ class JobRunner:
         self.failure_analyzer = FailureAnalyzer()
         self.benchmark = VisualPreservationProxyEvaluator()
 
-    def create_job(self) -> str:
+    def create_job(
+        self,
+        video_id: Optional[str] = None,
+        strategy_name: Optional[str] = None,
+        strategy_params: Optional[Dict[str, Any]] = None,
+    ) -> str:
         job_id = str(uuid.uuid4())
         self.jobs[job_id] = JobState(
             job_id=job_id,
@@ -43,10 +49,41 @@ class JobRunner:
             progress=0.0,
             current_step="Job queued"
         )
+        try:
+            job_repo.create_job(
+                job_id=job_id,
+                video_id=video_id or "",
+                strategy_name=strategy_name or "",
+                strategy_params=strategy_params or {},
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger("videoshrink").warning(f"Error recording job {job_id} in repo: {e}")
         return job_id
 
     def get_job(self, job_id: str) -> Optional[JobState]:
-        return self.jobs.get(job_id)
+        job = self.jobs.get(job_id)
+        if job is not None:
+            return job
+
+        # Job recovery: check repository (MongoDB / memory) in case worker restarted
+        try:
+            doc = job_repo.get_job(job_id)
+            if doc:
+                recovered_job = JobState(
+                    job_id=doc.get("job_id", job_id),
+                    status=doc.get("status", "pending"),
+                    progress=float(doc.get("progress", 0.0)),
+                    current_step=doc.get("current_step", ""),
+                    error_message=doc.get("error_message"),
+                    result=doc.get("result"),
+                )
+                self.jobs[job_id] = recovered_job
+                return recovered_job
+        except Exception:
+            pass
+
+        return None
 
     def submit_processing_job(
         self,
@@ -81,17 +118,25 @@ class JobRunner:
             job.status = "processing"
             job.progress = 5.0
             job.current_step = "Extracting video metadata..."
+            job_repo.update_progress(job_id, 5.0, job.current_step)
 
             reader = VideoReader(video_path)
             meta = reader.get_metadata()
 
             job.progress = 10.0
             job.current_step = f"Executing {strategy_name} frame sampling..."
+            job_repo.update_progress(job_id, 10.0, job.current_step)
 
+            last_persisted_pct = 10.0
             def update_progress(pct: float, msg: str):
+                nonlocal last_persisted_pct
                 # Map sampling progress to 10% - 65%
-                job.progress = 10.0 + (pct * 0.55)
+                current_pct = 10.0 + (pct * 0.55)
+                job.progress = current_pct
                 job.current_step = msg
+                if current_pct - last_persisted_pct >= 5.0 or current_pct >= 64.0:
+                    last_persisted_pct = current_pct
+                    job_repo.update_progress(job_id, current_pct, msg)
 
             # Run sampling algorithm
             selection = FrameSelector.run_selection(
@@ -103,6 +148,7 @@ class JobRunner:
 
             job.progress = 65.0
             job.current_step = "Analyzing failure risks & sensitive segments..."
+            job_repo.update_progress(job_id, 65.0, job.current_step)
 
             # Failure analysis
             timeline_summary = [
@@ -120,6 +166,7 @@ class JobRunner:
 
             job.progress = 75.0
             job.current_step = "Computing benchmark information fidelity..."
+            job_repo.update_progress(job_id, 75.0, job.current_step)
             bench_result = self.benchmark.evaluate(reader, selection)
 
             # Generate output video if requested
@@ -130,6 +177,7 @@ class JobRunner:
             if generate_video and selection.selected_indices:
                 job.progress = 80.0
                 job.current_step = "Synthesizing optimized video stream..."
+                job_repo.update_progress(job_id, 80.0, job.current_step)
                 out_filename = f"optimized_{job_id}_{video_path.stem}.mp4"
                 dest_path = settings.PROCESSED_DIR / out_filename
 
@@ -148,6 +196,7 @@ class JobRunner:
 
             job.progress = 90.0
             job.current_step = "Generating frame previews & timeline data..."
+            job_repo.update_progress(job_id, 90.0, job.current_step)
 
             # Sample key preview frames (up to 12 representative selected frames)
             preview_frames = self._extract_frame_previews(reader, selection)
@@ -183,8 +232,8 @@ class JobRunner:
                 "blurry_frames_count": blurry_count
             }
 
-            # Log to SQLite
-            exp_id = db.create_experiment(
+            # Log to MongoDB / SQLite repository
+            exp_id = experiment_repo.create_experiment(
                 video_filename=clean_filename,
                 video_duration=meta.duration_seconds,
                 strategy=strategy_name,
@@ -204,7 +253,8 @@ class JobRunner:
                     "sensitive_segments_count": len(sensitive_segments),
                     "segments": [s.__dict__ for s in sensitive_segments]
                 },
-                quality_summary=quality_summary
+                quality_summary=quality_summary,
+                video_id=video_path.stem.split("_")[0] if "_" in video_path.stem else None,
             )
 
             # Subsample timeline records for UI rendering if very long (max 1000 points)
@@ -235,12 +285,20 @@ class JobRunner:
                 }
             }
 
+            job_repo.complete_job(
+                job_id=job_id,
+                result=job.result,
+                processing_time_sec=selection.processing_time_sec,
+                output_info=job.result.get("output_video")
+            )
+
         except Exception as e:
             import traceback
             traceback.print_exc()
             job.status = "failed"
             job.error_message = str(e)
             job.current_step = f"Failed: {str(e)}"
+            job_repo.fail_job(job_id, error_message=str(e))
 
     def _extract_frame_previews(
         self,

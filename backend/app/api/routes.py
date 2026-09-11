@@ -10,6 +10,7 @@ from backend.app.video.reader import VideoReader
 from backend.app.services.job_runner import job_runner
 from backend.app.evaluation.comparison import StrategyComparator
 from backend.app.db.database import db
+from backend.app.database.repositories import video_repo, job_repo, experiment_repo
 from backend.app.api.schemas import ProcessRequest, CompareRequest, JobStatusResponse
 
 router = APIRouter()
@@ -76,11 +77,25 @@ async def upload_video(file: UploadFile = File(...)):
         )
 
     uploaded_videos[video_id] = save_path
+    meta_dict = meta.to_dict()
+
+    # Persist video metadata to repository (MongoDB Atlas / in-memory cache)
+    try:
+        video_repo.create_video(
+            video_id=video_id,
+            filename=file.filename or safe_name,
+            filepath=str(save_path),
+            file_size_bytes=save_path.stat().st_size,
+            metadata=meta_dict
+        )
+    except Exception as e:
+        import logging
+        logging.getLogger("videoshrink").warning(f"Failed to record video {video_id} in repo: {e}")
 
     return {
         "video_id": video_id,
         "filename": file.filename,
-        "metadata": meta.to_dict()
+        "metadata": meta_dict
     }
 
 @router.post("/sample/load")
@@ -99,12 +114,26 @@ async def load_sample_benchmark():
 
     reader = VideoReader(dest_path)
     meta = reader.get_metadata()
+    meta_dict = meta.to_dict()
     uploaded_videos[video_id] = dest_path
+
+    # Persist sample video metadata to repository
+    try:
+        video_repo.create_video(
+            video_id=video_id,
+            filename="benchmark_sample.mp4",
+            filepath=str(dest_path),
+            file_size_bytes=dest_path.stat().st_size,
+            metadata=meta_dict
+        )
+    except Exception as e:
+        import logging
+        logging.getLogger("videoshrink").warning(f"Failed to record sample video {video_id} in repo: {e}")
 
     return {
         "video_id": video_id,
         "filename": "benchmark_sample.mp4",
-        "metadata": meta.to_dict()
+        "metadata": meta_dict
     }
 
 @router.get("/video/{video_id}/metadata")
@@ -123,7 +152,15 @@ async def get_metadata(video_id: str):
             video_path = candidates[0]
             uploaded_videos[safe_video_id] = video_path
         else:
-            raise HTTPException(status_code=404, detail=f"Video ID '{safe_video_id}' not found.")
+            # Check repository metadata
+            doc = video_repo.get_video(safe_video_id)
+            if doc and doc.get("metadata"):
+                return doc["metadata"]
+            if doc and doc.get("filepath") and Path(doc["filepath"]).exists():
+                video_path = Path(doc["filepath"])
+                uploaded_videos[safe_video_id] = video_path
+            else:
+                raise HTTPException(status_code=404, detail=f"Video ID '{safe_video_id}' not found.")
 
     try:
         reader = VideoReader(video_path)
@@ -150,7 +187,11 @@ async def start_processing(request: ProcessRequest):
         else:
             raise HTTPException(status_code=404, detail=f"Video ID '{safe_video_id}' not found.")
 
-    job_id = job_runner.create_job()
+    job_id = job_runner.create_job(
+        video_id=safe_video_id,
+        strategy_name=request.strategy,
+        strategy_params=request.parameters,
+    )
     job_runner.submit_processing_job(
         job_id=job_id,
         video_path=video_path,
@@ -259,14 +300,19 @@ async def stream_video(identifier: str, original: bool = False):
             if candidates:
                 path = candidates[0]
             else:
-                # Check if safe_id is actually a job_id whose result has the video metadata/filepath
-                job = job_runner.get_job(safe_id)
-                if job and job.result:
-                    orig_filepath = job.result.get("video_metadata", {}).get("filepath")
-                    if orig_filepath and Path(orig_filepath).exists():
-                        path = Path(orig_filepath)
-                if not path or not path.exists():
-                    raise HTTPException(status_code=404, detail="Original video not found.")
+                # Check video_repo
+                v_doc = video_repo.get_video(safe_id)
+                if v_doc and v_doc.get("filepath") and Path(v_doc["filepath"]).exists():
+                    path = Path(v_doc["filepath"])
+                else:
+                    # Check if safe_id is actually a job_id whose result has the video metadata/filepath
+                    job = job_runner.get_job(safe_id)
+                    if job and job.result:
+                        orig_filepath = job.result.get("video_metadata", {}).get("filepath")
+                        if orig_filepath and Path(orig_filepath).exists():
+                            path = Path(orig_filepath)
+                    if not path or not path.exists():
+                        raise HTTPException(status_code=404, detail="Original video not found.")
     else:
         # Optimized video by job_id
         candidates = list(settings.PROCESSED_DIR.glob(f"optimized_{safe_id}_*.mp4"))
@@ -305,13 +351,13 @@ async def compare_video_strategies(request: CompareRequest):
 
 @router.get("/experiments")
 async def list_experiments(limit: int = Query(default=25, ge=1, le=100)):
-    """Retrieve experiment run history from SQLite."""
-    return db.list_experiments(limit=limit)
+    """Retrieve experiment run history from MongoDB (with SQLite fallback)."""
+    return experiment_repo.list_experiments(limit=limit)
 
 @router.get("/experiments/{exp_id}")
 async def get_experiment(exp_id: str):
     """Fetch details of a specific experiment."""
-    exp = db.get_experiment(exp_id)
+    exp = experiment_repo.get_experiment(exp_id)
     if not exp:
         raise HTTPException(status_code=404, detail=f"Experiment '{exp_id}' not found.")
     return exp
@@ -320,7 +366,7 @@ async def get_experiment(exp_id: str):
 async def export_experiment(exp_id: str):
     """Export complete experiment metadata and diagnostics as reproducible JSON."""
     from fastapi.responses import Response
-    json_data = db.export_experiment_json(exp_id)
+    json_data = experiment_repo.export_experiment_json(exp_id)
     if not json_data:
         raise HTTPException(status_code=404, detail=f"Experiment '{exp_id}' not found.")
     

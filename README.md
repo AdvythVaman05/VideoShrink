@@ -294,12 +294,37 @@ docker-compose up --build
 
 ---
 
-## 11. Railway Deployment
+## 11. Persistence & MongoDB Atlas Integration
+
+VideoShrink uses a hybrid persistence layer:
+* **Video Binaries**: Raw uploaded and processed MP4 binaries are streamed and stored strictly on disk/container storage (`data/uploads`, `data/processed`).
+* **Metadata & Experiments**: Persisted in MongoDB Atlas (`videos`, `jobs`, `experiments` collections) when configured, with seamless fallback to SQLite (`experiments/videoshrink.db`) for local testing or offline environments.
+
+### MongoDB Configuration (Environment Variables)
+
+```bash
+# Set MongoDB Atlas connection string (credentials are masked in logs and health checks)
+MONGODB_URI="mongodb+srv://<username>:<password>@<cluster>.mongodb.net/?retryWrites=true&w=majority"
+MONGODB_DATABASE="videoshrink"
+```
+
+### Migrating Historical Experiments from SQLite
+
+To migrate existing SQLite experiments into MongoDB Atlas:
+
+```bash
+python scripts/migrate_sqlite_to_mongodb.py --dry-run
+python scripts/migrate_sqlite_to_mongodb.py
+```
+
+---
+
+## 12. Railway Deployment
 
 VideoShrink is engineered for direct deployment to [Railway](https://railway.app):
 * Containerized with `Dockerfile` including `ffmpeg`, `libgl1`, and system OpenCV headless dependencies.
-* Production port binding via `$PORT`.
-* All paths parameterized via `backend/app/config.py`.
+* Production port binding via dynamic `$PORT` handled by Nginx reverse proxy.
+* MongoDB Atlas configured via Railway environment variables (`MONGODB_URI`, `MONGODB_DATABASE`).
 
 ### Deploying to Railway via Railway CLI:
 ```bash
@@ -309,7 +334,7 @@ railway up
 
 ---
 
-## 12. Future Extensions (Roadmap)
+## 13. Future Extensions (Roadmap)
 
 1. **PyTorch Downstream Model Benchmark**: Benchmark classification accuracy on Kinetics-400 / UCF-101 using VideoMAE or 3D-ResNet.
 2. **Object Detection Temporal Coverage**: Benchmark YOLOv8 / Faster-RCNN bounding-box tracklet continuity on pruned datasets.

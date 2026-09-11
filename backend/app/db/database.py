@@ -111,6 +111,37 @@ class ExperimentDatabase:
             ))
             conn.commit()
 
+        # Dual-mode sync: also sync to MongoDB if configured
+        try:
+            from backend.app.database.mongodb import get_mongo_db
+            mongo_db = get_mongo_db()
+            if mongo_db is not None:
+                doc = {
+                    "id": exp_id,
+                    "experiment_code": exp_code,
+                    "created_at": now.strftime("%Y-%m-%d %H:%M:%S"),
+                    "video_filename": video_filename,
+                    "video_duration": video_duration,
+                    "strategy": strategy,
+                    "parameters": parameters,
+                    "original_frames": original_frames,
+                    "selected_frames": selected_frames,
+                    "retention_rate": round(retention_rate, 4),
+                    "reduction_rate": round(reduction_rate, 4),
+                    "effective_fps": round(effective_fps, 2),
+                    "original_size_bytes": original_size_bytes,
+                    "compressed_size_bytes": compressed_size_bytes,
+                    "file_size_reduction_pct": file_size_reduction_pct,
+                    "processing_time_sec": round(processing_time_sec, 2),
+                    "info_preservation_score": info_preservation_score,
+                    "output_video_path": output_video_path,
+                    "failure_summary": failure_summary,
+                    "quality_summary": quality_summary,
+                }
+                mongo_db["experiments"].update_one({"id": exp_id}, {"$set": doc}, upsert=True)
+        except Exception:
+            pass
+
         return exp_id
 
     def get_experiment(self, exp_id: str) -> Optional[Dict[str, Any]]:

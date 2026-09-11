@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
 
+    # MongoDB Atlas settings
+    MONGODB_URI: str | None = None
+    MONGODB_DATABASE: str = "videoshrink"
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()

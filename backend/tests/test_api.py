@@ -9,7 +9,9 @@ SAMPLE_VIDEO_PATH = Path("sample_data/benchmark_sample.mp4")
 def test_health_check():
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "healthy"}
+    data = response.json()
+    assert data["status"] == "healthy"
+    assert "mongodb" in data
 
 def test_upload_and_metadata():
     assert SAMPLE_VIDEO_PATH.exists()

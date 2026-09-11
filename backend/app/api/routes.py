@@ -223,6 +223,31 @@ async def get_job_status(job_id: str):
         error_message=job.error_message
     )
 
+@router.post("/process/{job_id}/cancel")
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str):
+    """
+    Cooperatively cancel an active or pending processing job.
+    """
+    import re
+    safe_job_id = re.sub(r"[^a-zA-Z0-9_-]", "", job_id)
+    if not safe_job_id:
+        raise HTTPException(status_code=400, detail="Invalid job ID format.")
+
+    res = job_runner.cancel_job(safe_job_id)
+    status = res.get("status")
+
+    if status == "not_found":
+        raise HTTPException(status_code=404, detail=f"Job ID '{safe_job_id}' not found.")
+    elif status == "conflict":
+        raise HTTPException(status_code=409, detail=res.get("message", "Cannot cancel job."))
+
+    return {
+        "job_id": safe_job_id,
+        "status": status,
+        "message": res.get("message", "Job cancellation requested.")
+    }
+
 @router.get("/process/{job_id}/results")
 async def get_job_results(job_id: str):
     """Fetch completed results of a processing job."""
@@ -240,6 +265,12 @@ async def get_job_results(job_id: str):
             "current_step": job.current_step
         }
 
+    if job.status in ("cancelled", "cancelling"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job was cancelled: {job.error_message or 'Cancelled by user'}"
+        )
+
     if job.status == "failed":
         raise HTTPException(
             status_code=500,
@@ -255,8 +286,11 @@ async def download_video(job_id: str):
     import re
     safe_job_id = re.sub(r"[^a-zA-Z0-9_-]", "", job_id)
     job = job_runner.get_job(safe_job_id)
+    if job and job.status in ("cancelled", "cancelling"):
+        raise HTTPException(status_code=404, detail="Optimized video not available (job was cancelled).")
+
     if not job or not job.result:
-        # Try checking disk
+        # Try checking disk only if not cancelled
         candidates = list(settings.PROCESSED_DIR.glob(f"optimized_{safe_job_id}_*.mp4"))
         if candidates:
             return FileResponse(
@@ -315,6 +349,9 @@ async def stream_video(identifier: str, original: bool = False):
                         raise HTTPException(status_code=404, detail="Original video not found.")
     else:
         # Optimized video by job_id
+        job = job_runner.get_job(safe_id)
+        if job and job.status in ("cancelled", "cancelling"):
+            raise HTTPException(status_code=404, detail="Optimized video not found (job was cancelled).")
         candidates = list(settings.PROCESSED_DIR.glob(f"optimized_{safe_id}_*.mp4"))
         if candidates:
             path = candidates[0]

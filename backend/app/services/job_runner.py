@@ -1,6 +1,7 @@
 import uuid
 import time
 import base64
+import threading
 import cv2
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -9,7 +10,7 @@ from pathlib import Path
 
 from backend.app.config import settings
 from backend.app.video.reader import VideoReader
-from backend.app.video.writer import VideoWriter
+from backend.app.video.writer import VideoWriter, JobCancelledException
 from backend.app.sampling.base import SelectionResult
 from backend.app.sampling.selector import FrameSelector
 from backend.app.analysis.failure import FailureAnalyzer
@@ -21,7 +22,7 @@ from backend.app.database.repositories import job_repo, experiment_repo
 @dataclass
 class JobState:
     job_id: str
-    status: str  # "pending", "processing", "completed", "failed"
+    status: str  # "pending", "processing", "cancelling", "cancelled", "completed", "failed"
     progress: float  # 0.0 to 100.0
     current_step: str
     created_at: float = field(default_factory=time.time)
@@ -32,6 +33,7 @@ class JobRunner:
     def __init__(self, max_workers: int = 2):
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.jobs: Dict[str, JobState] = {}
+        self.cancellation_events: Dict[str, threading.Event] = {}
         self.writer = VideoWriter()
         self.failure_analyzer = FailureAnalyzer()
         self.benchmark = VisualPreservationProxyEvaluator()
@@ -49,6 +51,7 @@ class JobRunner:
             progress=0.0,
             current_step="Job queued"
         )
+        self.cancellation_events[job_id] = threading.Event()
         try:
             job_repo.create_job(
                 job_id=job_id,
@@ -60,6 +63,37 @@ class JobRunner:
             import logging
             logging.getLogger("videoshrink").warning(f"Error recording job {job_id} in repo: {e}")
         return job_id
+
+    def cancel_job(self, job_id: str) -> Dict[str, Any]:
+        job = self.get_job(job_id)
+        if not job:
+            return {"status": "not_found", "message": f"Job '{job_id}' not found."}
+
+        if job.status == "completed":
+            return {"status": "conflict", "message": "Cannot cancel completed job."}
+        if job.status == "failed":
+            return {"status": "conflict", "message": "Cannot cancel failed job."}
+        if job.status in ("cancelled", "cancelling"):
+            return {"status": job.status, "message": "Job cancellation already in progress or completed."}
+
+        event = self.cancellation_events.get(job_id)
+        if event is not None:
+            event.set()
+
+        if job.status == "pending" or event is None:
+            # If still queued and not running, immediately mark as cancelled
+            job.status = "cancelled"
+            job.current_step = "Processing cancelled by user"
+            job.error_message = "Cancelled by user"
+            job.result = None
+            job_repo.cancel_job(job_id, reason="Cancelled by user before execution")
+            self.cancellation_events.pop(job_id, None)
+            return {"status": "cancelled", "message": "Job cancelled."}
+        else:
+            # Active processing: transition to intermediate state 'cancelling'
+            job.status = "cancelling"
+            job.current_step = "Cancellation requested..."
+            return {"status": "cancelling", "message": "Job cancellation requested."}
 
     def get_job(self, job_id: str) -> Optional[JobState]:
         job = self.jobs.get(job_id)
@@ -114,15 +148,27 @@ class JobRunner:
         if not job:
             return
 
+        cancel_event = self.cancellation_events.get(job_id)
+        output_video_path_str: Optional[str] = None
+        dest_path: Optional[Path] = None
+
+        def check_cancellation():
+            if (cancel_event and cancel_event.is_set()) or job.status in ("cancelling", "cancelled"):
+                raise JobCancelledException("Job was cancelled by user.")
+
         try:
+            check_cancellation()
+
             job.status = "processing"
             job.progress = 5.0
             job.current_step = "Extracting video metadata..."
             job_repo.update_progress(job_id, 5.0, job.current_step)
 
+            check_cancellation()
             reader = VideoReader(video_path)
             meta = reader.get_metadata()
 
+            check_cancellation()
             job.progress = 10.0
             job.current_step = f"Executing {strategy_name} frame sampling..."
             job_repo.update_progress(job_id, 10.0, job.current_step)
@@ -130,6 +176,7 @@ class JobRunner:
             last_persisted_pct = 10.0
             def update_progress(pct: float, msg: str):
                 nonlocal last_persisted_pct
+                check_cancellation()
                 # Map sampling progress to 10% - 65%
                 current_pct = 10.0 + (pct * 0.55)
                 job.progress = current_pct
@@ -138,7 +185,7 @@ class JobRunner:
                     last_persisted_pct = current_pct
                     job_repo.update_progress(job_id, current_pct, msg)
 
-            # Run sampling algorithm
+            # Run sampling algorithm (progress callback checks cancellation periodically)
             selection = FrameSelector.run_selection(
                 strategy_name=strategy_name,
                 reader=reader,
@@ -146,6 +193,7 @@ class JobRunner:
                 progress_callback=update_progress
             )
 
+            check_cancellation()
             job.progress = 65.0
             job.current_step = "Analyzing failure risks & sensitive segments..."
             job_repo.update_progress(job_id, 65.0, job.current_step)
@@ -164,13 +212,15 @@ class JobRunner:
             ]
             sensitive_segments = self.failure_analyzer.analyze_timeline(timeline_summary)
 
+            check_cancellation()
             job.progress = 75.0
             job.current_step = "Computing benchmark information fidelity..."
             job_repo.update_progress(job_id, 75.0, job.current_step)
             bench_result = self.benchmark.evaluate(reader, selection)
 
+            check_cancellation()
+
             # Generate output video if requested
-            output_video_path_str = None
             compressed_size_bytes = None
             file_reduction_pct = None
 
@@ -185,7 +235,8 @@ class JobRunner:
                     source_video_path=video_path,
                     selected_indices=selection.selected_indices,
                     output_video_path=dest_path,
-                    preserve_duration=True
+                    preserve_duration=True,
+                    cancellation_check=lambda: (cancel_event and cancel_event.is_set()) or (job.status in ("cancelling", "cancelled"))
                 )
                 if written_path.exists():
                     output_video_path_str = str(written_path)
@@ -194,6 +245,7 @@ class JobRunner:
                         saved = meta.file_size_bytes - compressed_size_bytes
                         file_reduction_pct = round((saved / meta.file_size_bytes) * 100.0, 2)
 
+            check_cancellation()
             job.progress = 90.0
             job.current_step = "Generating frame previews & timeline data..."
             job_repo.update_progress(job_id, 90.0, job.current_step)
@@ -232,6 +284,8 @@ class JobRunner:
                 "blurry_frames_count": blurry_count
             }
 
+            check_cancellation()
+
             # Log to MongoDB / SQLite repository
             exp_id = experiment_repo.create_experiment(
                 video_filename=clean_filename,
@@ -259,6 +313,12 @@ class JobRunner:
 
             # Subsample timeline records for UI rendering if very long (max 1000 points)
             timeline_records = self._format_timeline_records(selection.frame_records)
+
+            check_cancellation()
+
+            # Final check before marking completed: ensure atomic state transition
+            if (cancel_event and cancel_event.is_set()) or job.status in ("cancelling", "cancelled"):
+                raise JobCancelledException("Job was cancelled prior to completion registration.")
 
             job.progress = 100.0
             job.status = "completed"
@@ -292,6 +352,21 @@ class JobRunner:
                 output_info=job.result.get("output_video")
             )
 
+        except JobCancelledException:
+            # Handle cancellation cleanly and delete any partial output
+            if dest_path and dest_path.exists():
+                dest_path.unlink(missing_ok=True)
+            if output_video_path_str and Path(output_video_path_str).exists():
+                Path(output_video_path_str).unlink(missing_ok=True)
+            for p in settings.PROCESSED_DIR.glob(f"optimized_{job_id}_*"):
+                p.unlink(missing_ok=True)
+
+            job.status = "cancelled"
+            job.error_message = "Cancelled by user"
+            job.current_step = "Processing cancelled by user"
+            job.result = None
+            job_repo.cancel_job(job_id, reason="Cancelled by user")
+
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -299,6 +374,8 @@ class JobRunner:
             job.error_message = str(e)
             job.current_step = f"Failed: {str(e)}"
             job_repo.fail_job(job_id, error_message=str(e))
+        finally:
+            self.cancellation_events.pop(job_id, None)
 
     def _extract_frame_previews(
         self,

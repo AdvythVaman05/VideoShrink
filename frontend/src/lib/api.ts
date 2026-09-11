@@ -2,6 +2,7 @@ import type {
   UploadResponse,
   ProcessRequest,
   ProcessResponse,
+  CancelResponse,
   JobStatusResponse,
   ProcessResultsResponse,
   ExperimentListResponse,
@@ -68,6 +69,13 @@ export const api = {
   async getJobStatus(jobId: string): Promise<JobStatusResponse> {
     const res = await fetch(`${API_BASE}/process/${jobId}/status`);
     return handleResponse<JobStatusResponse>(res);
+  },
+
+  async cancelJob(jobId: string): Promise<CancelResponse> {
+    const res = await fetch(`${API_BASE}/process/${jobId}/cancel`, {
+      method: 'POST',
+    });
+    return handleResponse<CancelResponse>(res);
   },
 
   async getJobResults(jobId: string): Promise<ProcessResultsResponse> {

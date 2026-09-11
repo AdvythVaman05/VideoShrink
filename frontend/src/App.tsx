@@ -118,8 +118,12 @@ export const App: React.FC = () => {
         localStorage.setItem('videoshrink_job_state', 'failed');
         window.location.hash = `#processing/${id}`;
         setStage('processing');
+      } else if (statusRes.status === 'cancelled') {
+        localStorage.setItem('videoshrink_job_state', 'cancelled');
+        window.location.hash = `#processing/${id}`;
+        setStage('processing');
       } else {
-        // 'pending' or 'processing'
+        // 'pending' or 'processing' or 'cancelling'
         localStorage.setItem('videoshrink_job_state', 'processing');
         window.location.hash = `#processing/${id}`;
         setStage('processing');
@@ -291,7 +295,16 @@ export const App: React.FC = () => {
                   onFailed={(err) => {
                     console.error('Processing job failed:', err);
                   }}
-                  onCancel={() => setStage('config')}
+                  onCancel={() => {
+                    localStorage.removeItem('videoshrink_active_job_id');
+                    localStorage.removeItem('videoshrink_job_state');
+                    window.location.hash = '';
+                    if (uploadData) {
+                      setStage('config');
+                    } else {
+                      handleReset();
+                    }
+                  }}
                   onStaleJob={handleReset}
                 />
               )}

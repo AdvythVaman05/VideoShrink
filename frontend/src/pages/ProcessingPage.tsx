@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { Loader2, AlertCircle, ArrowLeft, CheckCircle2, WifiOff } from 'lucide-react';
+import { Loader2, AlertCircle, ArrowLeft, CheckCircle2, WifiOff, XCircle } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import type { JobStatusResponse } from '../types/api';
 
@@ -25,6 +25,8 @@ export const ProcessingPage: React.FC<ProcessingPageProps> = ({
     current_step: 'Initializing compression job...',
     error_message: null,
   });
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const isMountedRef = useRef(true);
   const isCheckingRef = useRef(false);
@@ -53,6 +55,12 @@ export const ProcessingPage: React.FC<ProcessingPageProps> = ({
           pollTimerRef.current = null;
         }
         onFailed(res.error_message || 'Video processing failed.');
+      } else if (res.status === 'cancelled') {
+        if (pollTimerRef.current) {
+          clearInterval(pollTimerRef.current);
+          pollTimerRef.current = null;
+        }
+        setIsCancelling(false);
       }
     } catch (err: unknown) {
       if (!isMountedRef.current) return;
@@ -76,6 +84,27 @@ export const ProcessingPage: React.FC<ProcessingPageProps> = ({
       isCheckingRef.current = false;
     }
   }, [jobId, onCompleted, onFailed, onStaleJob]);
+
+  const handleCancelClick = async () => {
+    const confirmed = window.confirm('Cancel processing? The current processing job will be stopped.');
+    if (!confirmed) return;
+
+    setIsCancelling(true);
+    setCancelError(null);
+
+    try {
+      await api.cancelJob(jobId);
+      await checkStatus();
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.status === 409) {
+        // Job completed or failed just before cancellation
+        await checkStatus();
+      } else {
+        setCancelError(err instanceof Error ? err.message : 'Failed to request cancellation.');
+        setIsCancelling(false);
+      }
+    }
+  };
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -121,6 +150,9 @@ export const ProcessingPage: React.FC<ProcessingPageProps> = ({
     Math.max(0, Math.round(status.progress > 1 ? status.progress : status.progress * 100))
   );
 
+  const isTerminalCancelled = status.status === 'cancelled';
+  const isCancellingActive = isCancelling || status.status === 'cancelling';
+
   return (
     <div className="max-w-xl mx-auto px-4 py-20 text-center space-y-8">
       {/* Reconnecting banner if network drops */}
@@ -134,6 +166,8 @@ export const ProcessingPage: React.FC<ProcessingPageProps> = ({
       <div className="w-16 h-16 rounded-full bg-[#EFE8DC] text-[#D95F32] flex items-center justify-center mx-auto">
         {status.status === 'completed' ? (
           <CheckCircle2 className="w-8 h-8 text-[#1E7E34]" />
+        ) : isTerminalCancelled ? (
+          <XCircle className="w-8 h-8 text-[#77716A]" />
         ) : status.status === 'failed' ? (
           <AlertCircle className="w-8 h-8 text-[#C24F26]" />
         ) : (
@@ -145,28 +179,81 @@ export const ProcessingPage: React.FC<ProcessingPageProps> = ({
         <h2 className="text-2xl font-serif font-normal text-[#252321]">
           {status.status === 'completed'
             ? 'Optimization Finalized'
+            : isTerminalCancelled
+            ? 'Processing Cancelled'
             : status.status === 'failed'
             ? 'Processing Interrupted'
+            : isCancellingActive
+            ? 'Cancelling Processing...'
             : 'Analyzing & Compressing Sequence'}
         </h2>
         <p className="text-sm font-mono text-[#D95F32]">
-          {status.current_step || 'Evaluating frames...'}
+          {isTerminalCancelled
+            ? 'Job stopped by user. Incomplete output removed.'
+            : isCancellingActive
+            ? 'Terminating background tasks and cleaning up files...'
+            : status.current_step || 'Evaluating frames...'}
         </p>
       </div>
 
-      {/* Progress Bar */}
-      <div className="space-y-2">
-        <div className="h-2.5 w-full bg-[#EFE8DC] rounded-full overflow-hidden border border-[#DED7CC]">
-          <div
-            className="h-full bg-[#D95F32] transition-all duration-500 ease-out"
-            style={{ width: `${Math.max(5, percent)}%` }}
-          />
+      {/* Progress Bar (hidden if cancelled) */}
+      {!isTerminalCancelled && (
+        <div className="space-y-2">
+          <div className="h-2.5 w-full bg-[#EFE8DC] rounded-full overflow-hidden border border-[#DED7CC]">
+            <div
+              className="h-full bg-[#D95F32] transition-all duration-500 ease-out"
+              style={{ width: `${Math.max(5, percent)}%` }}
+            />
+          </div>
+          <div className="flex justify-between text-xs font-mono text-[#77716A]">
+            <span>Job: {jobId.slice(0, 8)}...</span>
+            <span>{percent}%</span>
+          </div>
         </div>
-        <div className="flex justify-between text-xs font-mono text-[#77716A]">
-          <span>Job: {jobId.slice(0, 8)}...</span>
-          <span>{percent}%</span>
+      )}
+
+      {/* Cancelled State Card */}
+      {isTerminalCancelled && (
+        <div className="p-6 rounded-2xl bg-[#FFFFFF] border border-[#DED7CC] text-center space-y-4 shadow-sm">
+          <p className="text-xs font-mono text-[#77716A]">
+            Background worker stopped cooperatively. Temporary files and partial MP4 streams were deleted.
+          </p>
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white border border-[#DED7CC] text-xs font-medium text-[#252321] hover:bg-[#EFE8DC] cursor-pointer shadow-sm transition-colors"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Return to Configuration</span>
+            </button>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Cancel Processing Action during active processing */}
+      {(status.status === 'pending' || status.status === 'processing' || isCancellingActive) && !isTerminalCancelled && (
+        <div className="pt-2 flex flex-col items-center gap-2">
+          <button
+            type="button"
+            onClick={handleCancelClick}
+            disabled={isCancellingActive}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white border border-[#F5C2B8] text-xs font-medium text-[#C24F26] hover:bg-[#FDF2F0] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors shadow-sm"
+          >
+            {isCancellingActive ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Cancelling...</span>
+              </>
+            ) : (
+              <span>Cancel Processing</span>
+            )}
+          </button>
+          {cancelError && (
+            <p className="text-xs text-[#C24F26] font-mono">{cancelError}</p>
+          )}
+        </div>
+      )}
 
       {/* Failure Info */}
       {status.status === 'failed' && (
@@ -185,9 +272,11 @@ export const ProcessingPage: React.FC<ProcessingPageProps> = ({
       )}
 
       {/* Subtext */}
-      <p className="text-xs text-[#77716A] max-w-sm mx-auto">
-        Running frame-by-frame color/gradient histogram diffing, optical flow calculations, and multi-threaded video encoding in background worker.
-      </p>
+      {!isTerminalCancelled && (
+        <p className="text-xs text-[#77716A] max-w-sm mx-auto">
+          Running frame-by-frame color/gradient histogram diffing, optical flow calculations, and multi-threaded video encoding in background worker.
+        </p>
+      )}
     </div>
   );
 };

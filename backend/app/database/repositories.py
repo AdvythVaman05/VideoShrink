@@ -242,6 +242,28 @@ class JobRepository:
                 return False
         return True
 
+    def cancel_job(self, job_id: str, reason: str = "Cancelled by user") -> bool:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        update_fields = {
+            "status": "cancelled",
+            "current_step": f"Cancelled: {reason}",
+            "error_message": reason,
+            "completed_at": now,
+            "cancelled_at": now,
+        }
+        if job_id in self._memory_cache:
+            self._memory_cache[job_id].update(update_fields)
+
+        coll = self._get_collection()
+        if coll is not None:
+            try:
+                coll.update_one({"job_id": job_id}, {"$set": update_fields}, upsert=True)
+                return True
+            except Exception as e:
+                logger.error(f"Error marking job {job_id} cancelled in MongoDB: {e}")
+                return False
+        return True
+
 class ExperimentRepository:
     """Manages experiment history and export records in MongoDB 'experiments' collection."""
     def _get_collection(self) -> Optional[Collection]:

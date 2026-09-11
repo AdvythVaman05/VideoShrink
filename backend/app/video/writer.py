@@ -7,6 +7,10 @@ import numpy as np
 
 from backend.app.video.reader import VideoReader
 
+class JobCancelledException(Exception):
+    """Raised when a video processing or encoding task is cancelled cooperatively."""
+    pass
+
 class VideoWriter:
     """
     Reconstructs an optimized video from selected frame indices.
@@ -22,6 +26,7 @@ class VideoWriter:
         output_video_path: str | Path,
         playback_fps: Optional[float] = None,
         preserve_duration: bool = True,
+        cancellation_check: Optional[Any] = None,
     ) -> Path:
         """
         Stream selected frames from source video to output MP4.
@@ -31,6 +36,10 @@ class VideoWriter:
         source_path = Path(source_video_path)
         output_path = Path(output_video_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if cancellation_check and cancellation_check():
+            output_path.unlink(missing_ok=True)
+            raise JobCancelledException("Video synthesis cancelled before start.")
 
         reader = VideoReader(source_path)
         meta = reader.get_metadata()
@@ -61,10 +70,15 @@ class VideoWriter:
                     output_path=output_path,
                     fps=fps,
                     width=width,
-                    height=height
+                    height=height,
+                    cancellation_check=cancellation_check
                 )
                 if output_path.exists() and output_path.stat().st_size > 0:
                     return output_path
+            except JobCancelledException:
+                # Do NOT fall back to OpenCV if job was cancelled
+                output_path.unlink(missing_ok=True)
+                raise
             except Exception as e:
                 # Remove partial/corrupt file before fallback
                 output_path.unlink(missing_ok=True)
@@ -77,7 +91,8 @@ class VideoWriter:
             output_path=output_path,
             fps=fps,
             width=width,
-            height=height
+            height=height,
+            cancellation_check=cancellation_check
         )
         return output_path
 
@@ -88,7 +103,8 @@ class VideoWriter:
         output_path: Path,
         fps: float,
         width: int,
-        height: int
+        height: int,
+        cancellation_check: Optional[Any] = None,
     ) -> None:
         cmd = [
             self.ffmpeg_path,
@@ -119,6 +135,21 @@ class VideoWriter:
         frame_idx = 0
         try:
             while True:
+                if cancellation_check and cancellation_check():
+                    if proc.stdin and not proc.stdin.closed:
+                        try:
+                            proc.stdin.close()
+                        except Exception:
+                            pass
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=2.0)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait(timeout=1.0)
+                    output_path.unlink(missing_ok=True)
+                    raise JobCancelledException("Video synthesis cancelled by user during FFmpeg encoding.")
+
                 ret, frame = cap.read()
                 if not ret or frame is None:
                     break
@@ -137,7 +168,11 @@ class VideoWriter:
         finally:
             cap.release()
             if proc.poll() is None:
-                proc.kill()
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=1.0)
+                except Exception:
+                    proc.kill()
 
     def _write_with_opencv(
         self,
@@ -146,7 +181,8 @@ class VideoWriter:
         output_path: Path,
         fps: float,
         width: int,
-        height: int
+        height: int,
+        cancellation_check: Optional[Any] = None,
     ) -> None:
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
@@ -157,6 +193,11 @@ class VideoWriter:
         frame_idx = 0
         try:
             while True:
+                if cancellation_check and cancellation_check():
+                    out.release()
+                    output_path.unlink(missing_ok=True)
+                    raise JobCancelledException("Video synthesis cancelled by user during OpenCV encoding.")
+
                 ret, frame = cap.read()
                 if not ret or frame is None:
                     break

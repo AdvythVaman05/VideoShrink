@@ -38,16 +38,22 @@ export interface ProcessRequest {
 
 export interface ProcessResponse {
   job_id: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: 'pending' | 'processing' | 'cancelling' | 'cancelled' | 'completed' | 'failed';
   message: string;
 }
 
 export interface JobStatusResponse {
   job_id: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: 'pending' | 'processing' | 'cancelling' | 'cancelled' | 'completed' | 'failed';
   progress: number;
   current_step: string;
   error_message?: string | null;
+}
+
+export interface CancelResponse {
+  job_id: string;
+  status: string;
+  message: string;
 }
 
 export interface CompressionMetrics {

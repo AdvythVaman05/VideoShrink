@@ -1,3 +1,12 @@
+# Stage 1: Build React Frontend
+FROM node:20-slim AS frontend-builder
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm install
+COPY frontend/ ./
+RUN npm run build
+
+# Stage 2: Production Python + Nginx Runtime
 FROM python:3.11-slim
 
 # Set environment variables
@@ -5,7 +14,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     DEBIAN_FRONTEND=noninteractive \
     PYTHONPATH=/app \
-    PORT=8000
+    PORT=8080
 
 # Install system dependencies: FFmpeg, OpenCV headless libraries, and Nginx reverse proxy
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -26,6 +35,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application source
 COPY . .
 
+# Copy compiled React frontend into Nginx web root
+COPY --from=frontend-builder /app/frontend/dist /var/www/html
+
 # Ensure storage directories exist with write permissions
 RUN mkdir -p data/uploads data/processed data/thumbnails experiments sample_data
 
@@ -38,5 +50,5 @@ RUN python sample_data/generate_sample_video.py
 # Expose public container port (Railway binds dynamic $PORT)
 EXPOSE 8080
 
-# Production start command routes both FastAPI and Streamlit via Nginx
+# Production start command routes FastAPI and serves React SPA via Nginx
 CMD ["/app/deployment/entrypoint.sh"]

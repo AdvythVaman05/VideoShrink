@@ -83,6 +83,30 @@ async def upload_video(file: UploadFile = File(...)):
         "metadata": meta.to_dict()
     }
 
+@router.post("/sample/load")
+async def load_sample_benchmark():
+    """
+    Loads the synthetic benchmark sample video directly for immediate exploration.
+    """
+    sample_path = settings.BASE_DIR / "sample_data" / "benchmark_sample.mp4"
+    if not sample_path.exists():
+        raise HTTPException(status_code=404, detail="Synthetic benchmark sample video not found on server.")
+
+    video_id = str(uuid.uuid4())
+    save_filename = f"{video_id}_benchmark_sample.mp4"
+    dest_path = settings.UPLOAD_DIR / save_filename
+    shutil.copyfile(sample_path, dest_path)
+
+    reader = VideoReader(dest_path)
+    meta = reader.get_metadata()
+    uploaded_videos[video_id] = dest_path
+
+    return {
+        "video_id": video_id,
+        "filename": "benchmark_sample.mp4",
+        "metadata": meta.to_dict()
+    }
+
 @router.get("/video/{video_id}/metadata")
 async def get_metadata(video_id: str):
     """Fetch metadata for an uploaded video."""

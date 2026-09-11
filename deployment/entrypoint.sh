@@ -27,37 +27,25 @@ echo "Launching FastAPI (internal 127.0.0.1:8000)..."
 python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 &
 FASTAPI_PID=$!
 
-# Start Streamlit on internal port 8501
-echo "Launching Streamlit (internal 127.0.0.1:8501)..."
-streamlit run frontend/streamlit_app.py \
-    --server.port 8501 \
-    --server.address 127.0.0.1 \
-    --server.headless true \
-    --server.enableCORS false \
-    --server.enableXsrfProtection false \
-    --browser.gatherUsageStats false &
-STREAMLIT_PID=$!
-
 # Trap termination signals to cleanly shut down child processes
 cleanup() {
     echo "Received termination signal. Shutting down child processes..."
-    kill -TERM "$FASTAPI_PID" "$STREAMLIT_PID" 2>/dev/null || true
+    kill -TERM "$FASTAPI_PID" 2>/dev/null || true
     wait "$FASTAPI_PID" 2>/dev/null || true
-    wait "$STREAMLIT_PID" 2>/dev/null || true
     exit 0
 }
 trap cleanup SIGINT SIGTERM
 
-# Wait for internal services to be ready before accepting public traffic
-echo "Waiting for internal services to become ready..."
+# Wait for FastAPI to be ready before accepting public traffic
+echo "Waiting for FastAPI backend to become ready..."
 for i in {1..30}; do
-    if curl -sf http://127.0.0.1:8000/health >/dev/null 2>&1 && curl -sf http://127.0.0.1:8501/_stcore/health >/dev/null 2>&1; then
-        echo "All internal services are healthy and responding!"
+    if curl -sf http://127.0.0.1:8000/health >/dev/null 2>&1; then
+        echo "FastAPI backend is healthy and responding!"
         break
     fi
     sleep 0.5
 done
 
-echo "Starting Nginx reverse proxy on public 0.0.0.0:${PORT}..."
+echo "Starting Nginx serving React SPA on public 0.0.0.0:${PORT}..."
 # Run Nginx in foreground (keeps container alive)
 nginx -g "daemon off;"

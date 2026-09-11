@@ -20,9 +20,40 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
 }) => {
   const { metrics, failure_analysis, benchmark, timeline, job_id, strategy } = results;
 
-  const originalStreamUrl = api.getStreamUrl(job_id, true);
+  const originalFrames = metrics.original_frames ?? metrics.original_frame_count ?? 0;
+  const selectedFrames = metrics.selected_frames ?? metrics.selected_frame_count ?? 0;
+  const framesRemoved = metrics.frames_removed ?? Math.max(0, originalFrames - selectedFrames);
+
+  const originalBytes = metrics.original_size_mb
+    ? metrics.original_size_mb * 1024 * 1024
+    : (metrics.original_file_size_bytes ?? 0);
+  const compressedBytes = metrics.compressed_size_mb
+    ? metrics.compressed_size_mb * 1024 * 1024
+    : (metrics.compressed_file_size_bytes ?? 0);
+
+  const originalFps = results.video_metadata?.fps ?? originalMetadata?.fps ?? metrics.original_fps ?? 30;
+  const effectiveFps = metrics.effective_fps ?? 0;
+  const processingTimeSec = metrics.processing_time_sec ?? metrics.processing_time_seconds ?? 0;
+
+  const proxyFidelity = benchmark?.proxy_fidelity_score ?? metrics.feature_preservation_index ?? 0;
+  const motionPreservation = benchmark?.motion_coverage_score ?? metrics.motion_preservation_score ?? 0;
+
+  const hasOutputVideo = Boolean(
+    typeof results.output_video === 'object'
+      ? results.output_video?.exists
+      : results.output_video
+  );
+  const downloadUrl = (typeof results.output_video === 'object' && results.output_video?.download_url)
+    ? results.output_video.download_url
+    : api.getDownloadUrl(job_id);
+
+  const originalStreamUrl = api.getStreamUrl(results.video_id || job_id, true);
   const compressedStreamUrl = api.getStreamUrl(job_id, false);
-  const downloadUrl = api.getDownloadUrl(job_id);
+
+  const durationSec = results.video_metadata?.duration_seconds
+    ?? originalMetadata?.duration
+    ?? metrics.original_duration_sec
+    ?? (originalFps > 0 ? originalFrames / originalFps : 0);
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 space-y-10">
@@ -37,7 +68,7 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
           </h1>
           <p className="text-xs text-[#77716A] mt-1">
             Algorithm: <span className="capitalize font-semibold text-[#252321]">{strategy.replace('_', ' ')}</span> • Processing completed in{' '}
-            {metrics.processing_time_seconds.toFixed(2)}s
+            {processingTimeSec.toFixed(2)}s
           </p>
         </div>
 
@@ -45,17 +76,17 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
           <button
             type="button"
             onClick={onStartOver}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-[#DED7CC] bg-[#FFFFFF] hover:bg-[#EFE8DC] text-xs font-medium text-[#252321] transition-colors"
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-[#DED7CC] bg-[#FFFFFF] hover:bg-[#EFE8DC] text-xs font-medium text-[#252321] transition-colors cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span>Process Another</span>
           </button>
 
-          {results.output_video && (
+          {hasOutputVideo && (
             <a
               href={downloadUrl}
               download
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#D95F32] hover:bg-[#C24F26] text-white text-xs font-medium shadow-sm transition-all"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#D95F32] hover:bg-[#C24F26] text-white text-xs font-medium shadow-sm transition-all cursor-pointer"
             >
               <Download className="w-4 h-4" />
               <span>Download MP4</span>
@@ -74,10 +105,10 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
           </div>
           <div>
             <div className="text-3xl font-serif font-semibold text-[#D95F32]">
-              {formatPercentage(metrics.frame_reduction_pct)}
+              {formatPercentage(metrics.frame_reduction_pct ?? 0)}
             </div>
             <div className="text-xs font-mono text-[#77716A] mt-1">
-              Pruned {metrics.original_frame_count - metrics.selected_frame_count} redundant frames
+              Pruned {framesRemoved} redundant frames
             </div>
           </div>
         </div>
@@ -90,10 +121,10 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
           </div>
           <div>
             <div className="text-3xl font-serif font-semibold text-[#252321]">
-              {formatPercentage(metrics.file_size_reduction_pct)}
+              {formatPercentage(metrics.file_size_reduction_pct ?? 0)}
             </div>
             <div className="text-xs font-mono text-[#77716A] mt-1 truncate">
-              {formatBytes(metrics.original_file_size_bytes)} → {formatBytes(metrics.compressed_file_size_bytes)}
+              {formatBytes(originalBytes)} → {formatBytes(compressedBytes)}
             </div>
           </div>
         </div>
@@ -106,8 +137,8 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
           </div>
           <div>
             <div className="text-3xl font-serif font-semibold text-[#252321]">
-              {metrics.selected_frame_count}
-              <span className="text-base font-normal text-[#77716A]"> / {metrics.original_frame_count}</span>
+              {selectedFrames}
+              <span className="text-base font-normal text-[#77716A]"> / {originalFrames}</span>
             </div>
             <div className="text-xs font-mono text-[#77716A] mt-1">
               Keyframes indexed & preserved
@@ -123,8 +154,8 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
           </div>
           <div>
             <div className="text-3xl font-serif font-semibold text-[#252321]">
-              {metrics.effective_fps.toFixed(1)}
-              <span className="text-base font-normal text-[#77716A]"> / {metrics.original_fps.toFixed(1)} fps</span>
+              {effectiveFps.toFixed(1)}
+              <span className="text-base font-normal text-[#77716A]"> / {originalFps.toFixed(1)} fps</span>
             </div>
             <div className="text-xs font-mono text-[#77716A] mt-1">
               Maintains full temporal span
@@ -142,28 +173,28 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
 
         <div className="flex items-center gap-6 text-xs font-mono">
           <div>
-            <span className="text-[#77716A]">Feature Fidelity: </span>
+            <span className="text-[#77716A]">Proxy Fidelity: </span>
             <span className="font-semibold text-[#252321]">
-              {metrics.feature_preservation_index.toFixed(3)}
+              {proxyFidelity.toFixed(3)}
             </span>
           </div>
           <div>
-            <span className="text-[#77716A]">Motion Preservation: </span>
+            <span className="text-[#77716A]">Motion Coverage: </span>
             <span className="font-semibold text-[#252321]">
-              {metrics.motion_preservation_score.toFixed(3)}
+              {motionPreservation.toFixed(3)}
             </span>
           </div>
           <div>
-            <span className="text-[#77716A]">Latency: </span>
+            <span className="text-[#77716A]">Compute Latency: </span>
             <span className="font-semibold text-[#252321]">
-              {metrics.processing_time_seconds.toFixed(2)}s
+              {processingTimeSec.toFixed(2)}s
             </span>
           </div>
         </div>
       </div>
 
       {/* Video Synchronizer */}
-      {results.output_video && (
+      {hasOutputVideo && (
         <VideoComparison
           jobId={job_id}
           originalStreamUrl={originalStreamUrl}
@@ -175,9 +206,9 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
       {/* Frame Timeline Barcode */}
       {timeline && timeline.length > 0 && (
         <FrameTimeline
-          originalFrameCount={metrics.original_frame_count}
+          originalFrameCount={originalFrames}
           selectedIndices={timeline}
-          durationSeconds={originalMetadata?.duration || metrics.original_frame_count / (metrics.original_fps || 30)}
+          durationSeconds={durationSec}
         />
       )}
 

@@ -208,6 +208,7 @@ async def get_job_results(job_id: str):
     return job.result
 
 @router.get("/video/{job_id}/download")
+@router.get("/process/{job_id}/download")
 async def download_video(job_id: str):
     """Download the optimized MP4 video produced by a job."""
     import re
@@ -243,6 +244,7 @@ async def download_video(job_id: str):
     )
 
 @router.get("/video/{identifier}/stream")
+@router.get("/process/{identifier}/stream")
 async def stream_video(identifier: str, original: bool = False):
     """Serve MP4 video for browser playback."""
     import re
@@ -257,7 +259,14 @@ async def stream_video(identifier: str, original: bool = False):
             if candidates:
                 path = candidates[0]
             else:
-                raise HTTPException(status_code=404, detail="Original video not found.")
+                # Check if safe_id is actually a job_id whose result has the video metadata/filepath
+                job = job_runner.get_job(safe_id)
+                if job and job.result:
+                    orig_filepath = job.result.get("video_metadata", {}).get("filepath")
+                    if orig_filepath and Path(orig_filepath).exists():
+                        path = Path(orig_filepath)
+                if not path or not path.exists():
+                    raise HTTPException(status_code=404, detail="Original video not found.")
     else:
         # Optimized video by job_id
         candidates = list(settings.PROCESSED_DIR.glob(f"optimized_{safe_id}_*.mp4"))

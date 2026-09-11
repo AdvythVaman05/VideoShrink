@@ -1,9 +1,10 @@
 import React, { useMemo } from 'react';
 import { BarChart3 } from 'lucide-react';
+import type { TimelinePoint } from '../types/api';
 
 interface FrameTimelineProps {
   originalFrameCount: number;
-  selectedIndices: number[];
+  selectedIndices: (TimelinePoint | number)[];
   durationSeconds: number;
 }
 
@@ -12,22 +13,36 @@ export const FrameTimeline: React.FC<FrameTimelineProps> = ({
   selectedIndices,
   durationSeconds,
 }) => {
+  // Extract normalized numeric indices of preserved frames
+  const preservedIndices = useMemo(() => {
+    if (!Array.isArray(selectedIndices)) return [];
+    return selectedIndices
+      .map((item) => {
+        if (typeof item === 'number') return item;
+        return item.is_selected ? item.frame_idx : -1;
+      })
+      .filter((idx) => idx >= 0);
+  }, [selectedIndices]);
+
   // Compute temporal density in 60 bins across the video length
   const densityBins = useMemo(() => {
     const numBins = 60;
     const bins = new Array(numBins).fill(0);
-    const binSize = originalFrameCount / numBins;
+    const count = originalFrameCount > 0 ? originalFrameCount : (preservedIndices.length || 1);
+    const binSize = count / numBins;
 
     if (binSize <= 0) return bins;
 
-    selectedIndices.forEach((idx) => {
+    preservedIndices.forEach((idx) => {
       const binIdx = Math.min(numBins - 1, Math.floor(idx / binSize));
       bins[binIdx] += 1;
     });
 
     const maxCount = Math.max(...bins, 1);
     return bins.map((count) => count / maxCount);
-  }, [originalFrameCount, selectedIndices]);
+  }, [originalFrameCount, preservedIndices]);
+
+  const frameTotal = Math.max(originalFrameCount, preservedIndices.length, 1);
 
   return (
     <div className="rounded-2xl border border-[#DED7CC] bg-[#FFFFFF] p-5 shadow-xs">
@@ -47,11 +62,11 @@ export const FrameTimeline: React.FC<FrameTimelineProps> = ({
         <div className="flex items-center gap-4 text-xs font-mono text-[#77716A]">
           <div className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-sm bg-[#D95F32]" />
-            <span>Preserved ({selectedIndices.length})</span>
+            <span>Preserved ({preservedIndices.length})</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-sm bg-[#EFE8DC]" />
-            <span>Pruned ({originalFrameCount - selectedIndices.length})</span>
+            <span>Pruned ({Math.max(0, frameTotal - preservedIndices.length)})</span>
           </div>
         </div>
       </div>
@@ -59,8 +74,8 @@ export const FrameTimeline: React.FC<FrameTimelineProps> = ({
       {/* Barcode Strip */}
       <div className="space-y-1.5">
         <div className="h-10 w-full bg-[#F7F3EC] rounded-lg border border-[#DED7CC] relative overflow-hidden flex items-stretch">
-          <svg className="w-full h-full" preserveAspectRatio="none" viewBox={`0 0 ${originalFrameCount} 100`}>
-            {selectedIndices.map((idx) => (
+          <svg className="w-full h-full" preserveAspectRatio="none" viewBox={`0 0 ${frameTotal} 100`}>
+            {preservedIndices.map((idx) => (
               <line
                 key={idx}
                 x1={idx}
@@ -68,7 +83,7 @@ export const FrameTimeline: React.FC<FrameTimelineProps> = ({
                 x2={idx}
                 y2={100}
                 stroke="#D95F32"
-                strokeWidth={Math.max(1, originalFrameCount / 600)}
+                strokeWidth={Math.max(1, frameTotal / 600)}
                 opacity={0.85}
               />
             ))}

@@ -151,8 +151,8 @@ export const VideoComparison: React.FC<VideoComparisonProps> = ({
               Original Dataset Video
             </span>
             <span className="font-mono text-[11px] text-[#A29A90]">
-              {metrics.original_frame_count} frames • {metrics.original_fps.toFixed(1)} fps •{' '}
-              {formatBytes(metrics.original_file_size_bytes)}
+              {metrics.original_frames ?? metrics.original_frame_count ?? 0} frames • {(metrics.original_fps ?? 30).toFixed(1)} fps •{' '}
+              {formatBytes(metrics.original_size_mb ? metrics.original_size_mb * 1024 * 1024 : (metrics.original_file_size_bytes ?? 0))}
             </span>
           </div>
           <div className="relative aspect-video flex items-center justify-center bg-black">
@@ -176,8 +176,8 @@ export const VideoComparison: React.FC<VideoComparisonProps> = ({
               VideoShrink Compressed
             </span>
             <span className="font-mono text-[11px] text-white/90">
-              {metrics.selected_frame_count} frames • {metrics.effective_fps.toFixed(1)} fps •{' '}
-              {formatBytes(metrics.compressed_file_size_bytes)}
+              {metrics.selected_frames ?? metrics.selected_frame_count ?? 0} frames • {(metrics.effective_fps ?? 0).toFixed(1)} fps •{' '}
+              {formatBytes(metrics.compressed_size_mb ? metrics.compressed_size_mb * 1024 * 1024 : (metrics.compressed_file_size_bytes ?? 0))}
             </span>
           </div>
           <div className="relative aspect-video flex items-center justify-center bg-black">

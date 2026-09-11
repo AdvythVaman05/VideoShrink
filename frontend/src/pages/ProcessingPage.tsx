@@ -59,7 +59,10 @@ export const ProcessingPage: React.FC<ProcessingPageProps> = ({
     };
   }, [jobId, onCompleted, onFailed]);
 
-  const percent = Math.min(100, Math.round(status.progress * 100));
+  const percent = Math.min(
+    100,
+    Math.max(0, Math.round(status.progress > 1 ? status.progress : status.progress * 100))
+  );
 
   return (
     <div className="max-w-xl mx-auto px-4 py-20 text-center space-y-8">

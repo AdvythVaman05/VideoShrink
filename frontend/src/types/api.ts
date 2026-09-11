@@ -1,11 +1,16 @@
 export interface VideoMetadata {
   filename: string;
-  duration: number;
-  frame_count: number;
+  filepath?: string;
+  duration?: number;
+  duration_seconds?: number;
+  frame_count?: number;
+  total_frames?: number;
   fps: number;
   width: number;
   height: number;
   file_size_bytes: number;
+  codec?: string | null;
+  bitrate_kbps?: number | null;
 }
 
 export interface UploadResponse {
@@ -42,51 +47,113 @@ export interface JobStatusResponse {
   status: 'pending' | 'processing' | 'completed' | 'failed';
   progress: number;
   current_step: string;
-  error_message: string | null;
+  error_message?: string | null;
 }
 
 export interface CompressionMetrics {
-  original_frame_count: number;
-  selected_frame_count: number;
+  original_frames: number;
+  selected_frames: number;
+  frames_removed: number;
   frame_reduction_pct: number;
-  original_file_size_bytes: number;
-  compressed_file_size_bytes: number;
-  file_size_reduction_pct: number;
-  original_fps: number;
+  frame_retention_pct: number;
+  original_size_mb: number;
+  compressed_size_mb: number | null;
+  file_size_reduction_pct: number | null;
+  original_duration_sec: number;
   effective_fps: number;
-  processing_time_seconds: number;
-  motion_preservation_score: number;
-  feature_preservation_index: number;
+  processing_time_sec: number;
+  fps_throughput: number;
+  // Fallbacks / legacy aliases
+  original_frame_count?: number;
+  selected_frame_count?: number;
+  original_file_size_bytes?: number;
+  compressed_file_size_bytes?: number;
+  original_fps?: number;
+  processing_time_seconds?: number;
+  feature_preservation_index?: number;
+  motion_preservation_score?: number;
+}
+
+export interface VisualPreservationProxyResult {
+  metric_name: string;
+  proxy_fidelity_score: number;
+  motion_coverage_score: number;
+  temporal_coverage_score: number;
+  sharpness_preservation_ratio: number;
+  disclaimer: string;
 }
 
 export interface BenchmarkResult {
-  strategy: string;
-  frame_reduction_pct: number;
-  feature_preservation_index: number;
-  motion_preservation_score: number;
-  processing_time_seconds: number;
+  strategy?: string;
+  frame_reduction_pct?: number;
+  feature_preservation_index?: number;
+  motion_preservation_score?: number;
+  processing_time_seconds?: number;
+}
+
+export interface SensitiveSegment {
+  start_sec: number;
+  end_sec: number;
+  start_time_formatted: string;
+  end_time_formatted: string;
+  reasons: string[];
+  severity: 'high' | 'medium' | 'low';
+  recommendation: string;
 }
 
 export interface FailureAnalysis {
-  information_loss_risk: 'low' | 'medium' | 'high';
-  temporal_jerkiness_score: number;
-  compression_artifacts_detected: boolean;
-  warnings: string[];
-  recommendations: string[];
+  sensitive_segments_count: number;
+  segments: SensitiveSegment[];
+  information_loss_risk?: 'low' | 'medium' | 'high';
+  temporal_jerkiness_score?: number;
+  compression_artifacts_detected?: boolean;
+  warnings?: string[];
+  recommendations?: string[];
+}
+
+export interface TimelinePoint {
+  frame_idx: number;
+  timestamp: number;
+  is_selected: boolean;
+  motion_score: number;
+  similarity_score: number;
+  is_scene_cut: boolean;
+  is_blurry: boolean;
+}
+
+export interface PreviewFrame {
+  frame_idx: number;
+  timestamp_sec: number;
+  timestamp_formatted: string;
+  selection_reason: string;
+  thumbnail_base64: string;
+  motion_score?: number | null;
+  similarity_score?: number | null;
+  blur_score?: number | null;
+}
+
+export interface OutputVideoInfo {
+  exists: boolean;
+  filename: string | null;
+  file_size_bytes: number | null;
+  download_url: string | null;
 }
 
 export interface ProcessResultsResponse {
   job_id: string;
-  video_id: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  experiment_id?: string;
+  video_id?: string;
+  video_metadata?: VideoMetadata;
+  status?: 'pending' | 'processing' | 'completed' | 'failed';
   strategy: string;
   parameters: Record<string, unknown>;
   metrics: CompressionMetrics;
-  benchmark: Record<string, BenchmarkResult>;
+  benchmark: VisualPreservationProxyResult;
   failure_analysis: FailureAnalysis;
-  timeline: number[];
-  output_video: string | null;
-  error_message: string | null;
+  timeline: (TimelinePoint | number)[];
+  preview_frames?: PreviewFrame[];
+  output_video: OutputVideoInfo | string | null;
+  error_message?: string | null;
 }
 
 export interface ExperimentSummary {

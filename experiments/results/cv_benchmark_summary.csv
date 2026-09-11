@@ -1,0 +1,12 @@
+Video,Strategy,Configuration,Original Frames,Selected Frames,Frame Reduction %,Effective FPS,Processing Time (s),Mean IoU,Centroid RMSE (px),Track Retention %,Track Loss Rate %,Scene Cut Recall %,Scene Cut Latency (ms),CAES Efficiency Score,Pareto Optimal
+benchmark_sample.mp4,dense_baseline,Dense Baseline (30 FPS),300,300,0.00%,30.00,0.0,1.0,0.0,100.00%,0.00%,100.0%,0.0,0.0,YES
+benchmark_sample.mp4,uniform,Uniform (15 FPS),300,152,49.33%,15.20,0.42,0.9664,7.55,96.64%,0.67%,100.0%,0.0,0.6532,YES
+benchmark_sample.mp4,uniform,Uniform (10 FPS),300,102,66.00%,10.20,0.34,0.9273,12.57,92.73%,1.00%,100.0%,0.0,0.7711,NO
+benchmark_sample.mp4,uniform,Uniform (5 FPS),300,52,82.67%,5.20,0.34,0.8319,31.31,83.19%,16.00%,100.0%,0.0,0.8293,NO
+benchmark_sample.mp4,uniform,Uniform (2 FPS),300,22,92.67%,2.20,0.33,0.7509,94.59,75.09%,21.33%,100.0%,0.0,0.8296,YES
+benchmark_sample.mp4,perceptual,Perceptual (thresh=0.98),300,93,69.00%,9.30,0.44,0.9633,24.53,96.33%,2.67%,100.0%,0.0,0.8041,YES
+benchmark_sample.mp4,perceptual,Perceptual (thresh=0.95),300,77,74.33%,7.70,0.44,0.9579,24.56,95.79%,2.67%,100.0%,0.0,0.8371,YES
+benchmark_sample.mp4,perceptual,Perceptual (thresh=0.90),300,11,96.33%,1.10,0.52,0.742,92.33,74.20%,22.33%,100.0%,0.0,0.8383,YES
+benchmark_sample.mp4,motion_aware,Motion-Aware (High Fidelity),300,51,83.00%,5.10,2.25,0.9216,25.09,92.16%,3.00%,100.0%,0.0,0.8734,YES
+benchmark_sample.mp4,motion_aware,Motion-Aware (Balanced),300,43,85.67%,4.30,2.17,0.9028,25.56,90.28%,3.00%,100.0%,0.0,0.8791,YES
+benchmark_sample.mp4,motion_aware,Motion-Aware (High Compression),300,28,90.67%,2.80,2.17,0.8122,37.77,81.22%,8.67%,100.0%,0.0,0.8568,YES

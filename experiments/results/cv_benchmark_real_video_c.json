@@ -1,0 +1,235 @@
+{
+  "video": "video_c_fast_action.mp4",
+  "ground_truth_type": "dense_reference_trajectory",
+  "metadata": {
+    "filename": "video_c_fast_action.mp4",
+    "filepath": "experiments\\test_videos\\video_c_fast_action.mp4",
+    "width": 768,
+    "height": 432,
+    "fps": 12.0,
+    "total_frames": 96,
+    "duration_seconds": 8.0,
+    "file_size_bytes": 362914,
+    "codec": "h264",
+    "bitrate_kbps": 362.91
+  },
+  "pareto_optimal_strategies": [
+    "Motion-Aware (High Compression)",
+    "Dense Baseline (12 FPS)",
+    "Uniform (10 FPS)",
+    "Uniform (5 FPS)",
+    "Perceptual (thresh=0.98)",
+    "Perceptual (thresh=0.95)",
+    "Perceptual (thresh=0.90)",
+    "Uniform (2 FPS)",
+    "Motion-Aware (Balanced)"
+  ],
+  "benchmark_results": [
+    {
+      "strategy": "dense_baseline",
+      "label": "Dense Baseline (12 FPS)",
+      "parameters": {
+        "target_fps": 12.0
+      },
+      "original_frames": 96,
+      "selected_frames": 96,
+      "frame_reduction_pct": 0.0,
+      "frame_retention_pct": 100.0,
+      "effective_fps": 12.0,
+      "processing_time_sec": 0.0,
+      "mean_iou": 1.0,
+      "centroid_rmse_px": 0.0,
+      "track_retention_ratio": 1.0,
+      "track_loss_rate_pct": 0.0,
+      "scene_cut_recall": null,
+      "scene_cut_latency_ms": null,
+      "efficiency_score_caes": 0.0
+    },
+    {
+      "strategy": "uniform",
+      "label": "Uniform (10 FPS)",
+      "parameters": {
+        "target_fps": 10.0
+      },
+      "original_frames": 96,
+      "selected_frames": 81,
+      "frame_reduction_pct": 15.625,
+      "frame_retention_pct": 84.375,
+      "effective_fps": 10.125,
+      "processing_time_sec": 0.29,
+      "mean_iou": 0.9792,
+      "centroid_rmse_px": 16.02,
+      "track_retention_ratio": 0.9792,
+      "track_loss_rate_pct": 1.04,
+      "scene_cut_recall": null,
+      "scene_cut_latency_ms": null,
+      "efficiency_score_caes": 0.2695
+    },
+    {
+      "strategy": "uniform",
+      "label": "Uniform (5 FPS)",
+      "parameters": {
+        "target_fps": 5.0
+      },
+      "original_frames": 96,
+      "selected_frames": 42,
+      "frame_reduction_pct": 56.25,
+      "frame_retention_pct": 43.75,
+      "effective_fps": 5.25,
+      "processing_time_sec": 0.32,
+      "mean_iou": 0.9339,
+      "centroid_rmse_px": 25.37,
+      "track_retention_ratio": 0.9339,
+      "track_loss_rate_pct": 2.08,
+      "scene_cut_recall": null,
+      "scene_cut_latency_ms": null,
+      "efficiency_score_caes": 0.7021
+    },
+    {
+      "strategy": "uniform",
+      "label": "Uniform (2 FPS)",
+      "parameters": {
+        "target_fps": 2.0
+      },
+      "original_frames": 96,
+      "selected_frames": 18,
+      "frame_reduction_pct": 81.25,
+      "frame_retention_pct": 18.75,
+      "effective_fps": 2.25,
+      "processing_time_sec": 0.3,
+      "mean_iou": 0.8504,
+      "centroid_rmse_px": 34.35,
+      "track_retention_ratio": 0.8504,
+      "track_loss_rate_pct": 4.17,
+      "scene_cut_recall": null,
+      "scene_cut_latency_ms": null,
+      "efficiency_score_caes": 0.831
+    },
+    {
+      "strategy": "perceptual",
+      "label": "Perceptual (thresh=0.98)",
+      "parameters": {
+        "similarity_threshold": 0.98
+      },
+      "original_frames": 96,
+      "selected_frames": 7,
+      "frame_reduction_pct": 92.70833333333334,
+      "frame_retention_pct": 7.291666666666667,
+      "effective_fps": 0.875,
+      "processing_time_sec": 0.33,
+      "mean_iou": 0.6229,
+      "centroid_rmse_px": 32.14,
+      "track_retention_ratio": 0.6229,
+      "track_loss_rate_pct": 5.21,
+      "scene_cut_recall": null,
+      "scene_cut_latency_ms": null,
+      "efficiency_score_caes": 0.7451
+    },
+    {
+      "strategy": "perceptual",
+      "label": "Perceptual (thresh=0.95)",
+      "parameters": {
+        "similarity_threshold": 0.95
+      },
+      "original_frames": 96,
+      "selected_frames": 5,
+      "frame_reduction_pct": 94.79166666666666,
+      "frame_retention_pct": 5.208333333333334,
+      "effective_fps": 0.625,
+      "processing_time_sec": 0.32,
+      "mean_iou": 0.5126,
+      "centroid_rmse_px": 66.26,
+      "track_retention_ratio": 0.5126,
+      "track_loss_rate_pct": 22.92,
+      "scene_cut_recall": null,
+      "scene_cut_latency_ms": null,
+      "efficiency_score_caes": 0.6653
+    },
+    {
+      "strategy": "perceptual",
+      "label": "Perceptual (thresh=0.90)",
+      "parameters": {
+        "similarity_threshold": 0.9
+      },
+      "original_frames": 96,
+      "selected_frames": 5,
+      "frame_reduction_pct": 94.79166666666666,
+      "frame_retention_pct": 5.208333333333334,
+      "effective_fps": 0.625,
+      "processing_time_sec": 0.31,
+      "mean_iou": 0.5126,
+      "centroid_rmse_px": 66.26,
+      "track_retention_ratio": 0.5126,
+      "track_loss_rate_pct": 22.92,
+      "scene_cut_recall": null,
+      "scene_cut_latency_ms": null,
+      "efficiency_score_caes": 0.6653
+    },
+    {
+      "strategy": "motion_aware",
+      "label": "Motion-Aware (High Fidelity)",
+      "parameters": {
+        "motion_sensitivity": 0.3,
+        "min_fps": 2.0,
+        "max_fps": 12.0
+      },
+      "original_frames": 96,
+      "selected_frames": 19,
+      "frame_reduction_pct": 80.20833333333334,
+      "frame_retention_pct": 19.791666666666664,
+      "effective_fps": 2.375,
+      "processing_time_sec": 0.72,
+      "mean_iou": 0.8633,
+      "centroid_rmse_px": 25.83,
+      "track_retention_ratio": 0.8633,
+      "track_loss_rate_pct": 3.12,
+      "scene_cut_recall": null,
+      "scene_cut_latency_ms": null,
+      "efficiency_score_caes": 0.8316
+    },
+    {
+      "strategy": "motion_aware",
+      "label": "Motion-Aware (Balanced)",
+      "parameters": {
+        "motion_sensitivity": 0.5,
+        "min_fps": 2.0,
+        "max_fps": 12.0
+      },
+      "original_frames": 96,
+      "selected_frames": 19,
+      "frame_reduction_pct": 80.20833333333334,
+      "frame_retention_pct": 19.791666666666664,
+      "effective_fps": 2.375,
+      "processing_time_sec": 0.78,
+      "mean_iou": 0.8654,
+      "centroid_rmse_px": 25.87,
+      "track_retention_ratio": 0.8654,
+      "track_loss_rate_pct": 3.12,
+      "scene_cut_recall": null,
+      "scene_cut_latency_ms": null,
+      "efficiency_score_caes": 0.8325
+    },
+    {
+      "strategy": "motion_aware",
+      "label": "Motion-Aware (High Compression)",
+      "parameters": {
+        "motion_sensitivity": 0.8,
+        "min_fps": 1.0,
+        "max_fps": 10.0
+      },
+      "original_frames": 96,
+      "selected_frames": 12,
+      "frame_reduction_pct": 87.5,
+      "frame_retention_pct": 12.5,
+      "effective_fps": 1.5,
+      "processing_time_sec": 0.79,
+      "mean_iou": 0.7952,
+      "centroid_rmse_px": 38.19,
+      "track_retention_ratio": 0.7952,
+      "track_loss_rate_pct": 5.21,
+      "scene_cut_recall": null,
+      "scene_cut_latency_ms": null,
+      "efficiency_score_caes": 0.8332
+    }
+  ]
+}

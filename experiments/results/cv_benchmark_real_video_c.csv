@@ -1,0 +1,11 @@
+Video,Strategy,Configuration,Original Frames,Selected Frames,Frame Reduction %,Effective FPS,Processing Time (s),Mean IoU,Centroid RMSE (px),Track Retention %,Track Loss Rate %,Scene Cut Recall %,Scene Cut Latency (ms),CAES Efficiency Score,Pareto Optimal
+video_c_fast_action.mp4,dense_baseline,Dense Baseline (12 FPS),96,96,0.00%,12.00,0.0,1.0,0.0,100.00%,0.00%,N/A,N/A,0.0,YES
+video_c_fast_action.mp4,uniform,Uniform (10 FPS),96,81,15.62%,10.12,0.29,0.9792,16.02,97.92%,1.04%,N/A,N/A,0.2695,YES
+video_c_fast_action.mp4,uniform,Uniform (5 FPS),96,42,56.25%,5.25,0.32,0.9339,25.37,93.39%,2.08%,N/A,N/A,0.7021,YES
+video_c_fast_action.mp4,uniform,Uniform (2 FPS),96,18,81.25%,2.25,0.3,0.8504,34.35,85.04%,4.17%,N/A,N/A,0.831,YES
+video_c_fast_action.mp4,perceptual,Perceptual (thresh=0.98),96,7,92.71%,0.88,0.33,0.6229,32.14,62.29%,5.21%,N/A,N/A,0.7451,YES
+video_c_fast_action.mp4,perceptual,Perceptual (thresh=0.95),96,5,94.79%,0.62,0.32,0.5126,66.26,51.26%,22.92%,N/A,N/A,0.6653,YES
+video_c_fast_action.mp4,perceptual,Perceptual (thresh=0.90),96,5,94.79%,0.62,0.31,0.5126,66.26,51.26%,22.92%,N/A,N/A,0.6653,YES
+video_c_fast_action.mp4,motion_aware,Motion-Aware (High Fidelity),96,19,80.21%,2.38,0.72,0.8633,25.83,86.33%,3.12%,N/A,N/A,0.8316,NO
+video_c_fast_action.mp4,motion_aware,Motion-Aware (Balanced),96,19,80.21%,2.38,0.78,0.8654,25.87,86.54%,3.12%,N/A,N/A,0.8325,YES
+video_c_fast_action.mp4,motion_aware,Motion-Aware (High Compression),96,12,87.50%,1.50,0.79,0.7952,38.19,79.52%,5.21%,N/A,N/A,0.8332,YES
